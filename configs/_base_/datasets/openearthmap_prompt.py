@@ -62,4 +62,7 @@ val_dataloader = dict(
 
 test_dataloader = val_dataloader
 val_evaluator = dict(type='IoUMetric', iou_metrics=['mIoU', 'mFscore'])
-test_evaluator = val_evaluator
+
+# ``configs/base_config.py`` already owns ``test_evaluator``.  Keep this
+# fragment data/validation-only so it can be combined with that base without
+# MMEngine rejecting duplicate keys among sibling ``_base_`` configs.
