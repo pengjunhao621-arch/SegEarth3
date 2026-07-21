@@ -112,7 +112,11 @@ custom_hooks = [
         nll_key='prompt/validation_objective'),
 ]
 
-randomness = dict(seed=0, deterministic=True)
+# Keep the seed and disable cuDNN benchmarking, but do not enable PyTorch's
+# global deterministic-algorithm error mode.  The differentiable SAM3
+# grounding path necessarily uses CUDA bilinear interpolation; PyTorch 1.13
+# raises during its backward pass when deterministic algorithms are forced.
+randomness = dict(seed=0, deterministic=False)
 env_cfg = dict(
     cudnn_benchmark=False,
     mp_cfg=dict(mp_start_method='fork', opencv_num_threads=0),

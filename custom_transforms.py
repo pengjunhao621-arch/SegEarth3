@@ -1,7 +1,7 @@
 import mmcv
 import mmengine.fileio as fileio
 import numpy as np
-from mmcv.transforms import LoadImageFromFile
+from mmcv.transforms import BaseTransform, LoadImageFromFile
 from mmengine.registry import TRANSFORMS
 from typing import Optional
 
@@ -75,10 +75,11 @@ class LoadCDImagesFromFile(LoadImageFromFile):
 
 
 @TRANSFORMS.register_module()
-class RandomDiscreteRotate90:
+class RandomDiscreteRotate90(BaseTransform):
     """Uniformly rotate image and segmentation maps by 0/90/180/270 degrees."""
 
     def __init__(self, choices=(0, 1, 2, 3)):
+        super().__init__()
         self.choices = tuple(int(value) for value in choices)
         if not self.choices or any(value not in (0, 1, 2, 3) for value in self.choices):
             raise ValueError("choices must be a non-empty subset of (0, 1, 2, 3)")
@@ -98,7 +99,7 @@ class RandomDiscreteRotate90:
 
 
 @TRANSFORMS.register_module()
-class MildBrightnessContrastSaturation:
+class MildBrightnessContrastSaturation(BaseTransform):
     """Image-only mild color jitter without hue changes.
 
     Brightness, contrast, and saturation factors are sampled independently
@@ -113,6 +114,7 @@ class MildBrightnessContrastSaturation:
             brightness=(0.8, 1.2),
             contrast=(0.8, 1.2),
             saturation=(0.8, 1.2)):
+        super().__init__()
         self.prob = float(prob)
         if not 0.0 <= self.prob <= 1.0:
             raise ValueError('prob must be in [0, 1]')
