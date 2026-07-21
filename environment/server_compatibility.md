@@ -31,6 +31,9 @@ upgrade the remote server.
 
 - MMCV 2.0 custom data transforms must inherit `BaseTransform`; implementing
   `transform()` alone does not make an instance callable by MMEngine Compose.
+- MMSegmentation 1.2.2 training calls `stack_batch`, which requires exactly
+  one of `SegDataPreProcessor.size` and `size_divisor`. The Prompt-SAM3
+  OpenEarthMap config uses fixed `size=(512, 512)` to match its train crop.
 - PyTorch 1.13.1 supports `torch.autocast` and checkpoint
   `use_reentrant=False`, both used by Prompt-SAM3.
 - Do not enable SAM3 `torch.compile` paths: `torch.compile` starts in PyTorch
@@ -46,7 +49,9 @@ upgrade the remote server.
   errors as a known environment risk if they appear.
 - Triton 3.4.0 is present but is not used by the PyTorch 1.13 Prompt-SAM3 path.
 
-Run the project preflight before a smoke/full training job:
+Run the project preflight before a smoke/full training job. It constructs all
+transforms and the dataset, loads one packed sample, and executes the actual
+MMSeg training data-preprocessor path before SAM3 model construction:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python tools/preflight_prompt_training.py \

@@ -6,6 +6,15 @@ _base_ = [
 model = dict(
     _delete_=True,
     type='PromptSegEarthOV3Segmentation',
+    # MMSeg 1.2.2 requires exactly one training padding policy.  This matches
+    # the fixed 512x512 RandomCrop in the OpenEarthMap prompt train pipeline.
+    data_preprocessor=dict(
+        mean=[0.0, 0.0, 0.0],
+        std=[1.0, 1.0, 1.0],
+        bgr_to_rgb=True,
+        pad_val=0,
+        seg_pad_val=255,
+        size=(512, 512)),
     model_type='Prompt-SAM3-sam3-global',
     classname_path='./configs/cls_openearthmap.txt',
     prob_thd=0.1,

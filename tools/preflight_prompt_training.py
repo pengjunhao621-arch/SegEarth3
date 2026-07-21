@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 import torch
 from mmengine.config import Config
 from mmengine.registry import DefaultScope, TRANSFORMS
+from mmseg.models.data_preprocessor import SegDataPreProcessor
 from mmseg.registry import DATASETS
 from torch.utils.checkpoint import checkpoint
 
@@ -155,6 +156,47 @@ def _validate_dataset(cfg):
     print(f"Train samples: {len(dataset)}")
     print(f"First input shape: {tuple(sample['inputs'].shape)}")
     print(f"First label shape: {tuple(data_sample.gt_sem_seg.data.shape)}")
+    return sample
+
+
+def _validate_data_preprocessor(cfg, sample):
+    preprocessor_cfg = copy.deepcopy(
+        dict(cfg.model.get("data_preprocessor", {}))
+    )
+    size = preprocessor_cfg.get("size")
+    size_divisor = preprocessor_cfg.get("size_divisor")
+    if (size is not None) == (size_divisor is not None):
+        raise RuntimeError(
+            "Prompt training data_preprocessor must define exactly one of "
+            "`size` and `size_divisor` for MMSeg 1.2.2"
+        )
+
+    preprocessor = SegDataPreProcessor(**preprocessor_cfg)
+    processed = preprocessor(
+        dict(
+            inputs=[sample["inputs"]],
+            data_samples=[sample["data_samples"]],
+        ),
+        training=True,
+    )
+    batch_inputs = processed["inputs"]
+    if batch_inputs.ndim != 4 or batch_inputs.shape[0] != 1:
+        raise RuntimeError(
+            "Prompt training data_preprocessor returned an invalid input "
+            f"batch shape: {tuple(batch_inputs.shape)}"
+        )
+    batch_labels = processed["data_samples"][0].gt_sem_seg.data
+    if tuple(batch_inputs.shape[-2:]) != tuple(batch_labels.shape[-2:]):
+        raise RuntimeError(
+            "Prompt training image/label shapes diverged after preprocessing: "
+            f"image={tuple(batch_inputs.shape[-2:])}, "
+            f"label={tuple(batch_labels.shape[-2:])}"
+        )
+    policy = f"size={tuple(size)}" if size is not None else (
+        f"size_divisor={size_divisor}"
+    )
+    print(f"Train preprocessor: {policy}")
+    print(f"First batch shape: {tuple(batch_inputs.shape)}")
 
 
 def main():
@@ -176,8 +218,12 @@ def main():
     _validate_runtime(cfg)
     _validate_assets(cfg)
     _validate_transforms(cfg)
-    _validate_dataset(cfg)
-    print("PASS: Prompt-SAM3 runtime, transforms, and first data sample")
+    sample = _validate_dataset(cfg)
+    _validate_data_preprocessor(cfg, sample)
+    print(
+        "PASS: Prompt-SAM3 runtime, transforms, first data sample, and "
+        "training data preprocessor"
+    )
 
 
 if __name__ == "__main__":
