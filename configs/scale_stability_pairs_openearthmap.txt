@@ -1,0 +1,2 @@
+pavement->building
+grass->tree
