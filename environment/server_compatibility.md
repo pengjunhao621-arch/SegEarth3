@@ -34,6 +34,10 @@ upgrade the remote server.
 - MMSegmentation 1.2.2 training calls `stack_batch`, which requires exactly
   one of `SegDataPreProcessor.size` and `size_divisor`. The Prompt-SAM3
   OpenEarthMap config uses fixed `size=(512, 512)` to match its train crop.
+- MMEngine 0.10.4 converts each `BaseDataElement` model output to a plain
+  nested dictionary before dispatching it to metrics. Custom metrics must read
+  fields such as `sample['seg_logits']['data']`, matching MMSeg 1.2.2's
+  `IoUMetric`; attribute access is valid in the model but not in a metric.
 - PyTorch 1.13.1 supports `torch.autocast` and checkpoint
   `use_reentrant=False`, both used by Prompt-SAM3.
 - Do not enable SAM3 `torch.compile` paths: `torch.compile` starts in PyTorch

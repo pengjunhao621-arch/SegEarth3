@@ -9,6 +9,8 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
+import numpy as np
+
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -17,12 +19,17 @@ if str(ROOT) not in sys.path:
 import torch
 from mmengine.config import Config
 from mmengine.registry import DefaultScope, TRANSFORMS
+from mmengine.runner import Runner
+from mmengine.structures import PixelData
 from mmseg.models.data_preprocessor import SegDataPreProcessor
 from mmseg.registry import DATASETS
+from mmseg.structures import SegDataSample
 from torch.utils.checkpoint import checkpoint
 
 import custom_datasets  # noqa: F401
 import custom_transforms  # noqa: F401
+from prompt_experiment_hooks import PromptBestCheckpointHook
+from prompt_experiment_metrics import PromptValidationMetric
 
 
 SERVER_REFERENCE = {
@@ -65,6 +72,9 @@ def _validate_runtime(cfg):
         errors.append("torch.autocast is unavailable")
     if "use_reentrant" not in inspect.signature(checkpoint).parameters:
         errors.append("torch.utils.checkpoint lacks use_reentrant support")
+    checkpoint_parameters = inspect.signature(Runner.save_checkpoint).parameters
+    if "filename" not in checkpoint_parameters:
+        errors.append("MMEngine Runner.save_checkpoint lacks filename support")
 
     randomness = cfg.get("randomness", {})
     if bool(randomness.get("deterministic", False)):
@@ -199,6 +209,69 @@ def _validate_data_preprocessor(cfg, sample):
     print(f"First batch shape: {tuple(batch_inputs.shape)}")
 
 
+def _validate_metric_contract():
+    metric = PromptValidationMetric(ignore_index=255, num_bins=5)
+    model_sample = SegDataSample()
+    model_sample.set_data(
+        {
+            "seg_logits": PixelData(
+                data=torch.tensor(
+                    [
+                        [[0.8, 0.2], [0.7, 0.1]],
+                        [[0.2, 0.8], [0.3, 0.9]],
+                    ],
+                    dtype=torch.float32,
+                )
+            ),
+            "gt_sem_seg": PixelData(
+                data=torch.tensor([[[0, 1], [0, 1]]], dtype=torch.long)
+            ),
+            "pred_sem_seg": PixelData(
+                data=torch.tensor([[[0, 1], [0, 1]]], dtype=torch.long)
+            ),
+            "prompt_anchor": torch.tensor(0.25),
+        }
+    )
+    evaluator_sample = model_sample.to_dict()
+    metric.process(data_batch={}, data_samples=[evaluator_sample])
+    values = metric.compute_metrics(metric.results)
+    required = {
+        "NLL",
+        "DiceLoss",
+        "AnchorLoss",
+        "validation_objective",
+        "ECE",
+    }
+    missing = required - set(values)
+    if missing:
+        raise RuntimeError(
+            "Prompt validation metric omitted required values: "
+            f"{sorted(missing)}"
+        )
+    if not all(np.isfinite(float(values[key])) for key in required):
+        raise RuntimeError(
+            "Prompt validation metric produced non-finite values: "
+            f"{values}"
+        )
+    published_metrics = {
+        "IoU/mIoU": 42.0,
+        "prompt/validation_objective": values["validation_objective"],
+    }
+    if PromptBestCheckpointHook._find_metric(
+        published_metrics, "mIoU"
+    ) != 42.0:
+        raise RuntimeError("Prompt best-checkpoint hook could not resolve mIoU")
+    objective = PromptBestCheckpointHook._find_metric(
+        published_metrics, "prompt/validation_objective"
+    )
+    if objective != values["validation_objective"]:
+        raise RuntimeError(
+            "Prompt best-checkpoint hook could not resolve validation objective"
+        )
+    print("Validation metric contract: evaluator dict -> PASS")
+    print("Best-checkpoint metric resolution: prefixed metrics -> PASS")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Preflight Prompt-SAM3 server runtime and OpenEarthMap data"
@@ -216,13 +289,14 @@ def main():
     )
     _print_runtime()
     _validate_runtime(cfg)
+    _validate_metric_contract()
     _validate_assets(cfg)
     _validate_transforms(cfg)
     sample = _validate_dataset(cfg)
     _validate_data_preprocessor(cfg, sample)
     print(
         "PASS: Prompt-SAM3 runtime, transforms, first data sample, and "
-        "training data preprocessor"
+        "training/validation contracts"
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Dict, List
 
 import numpy as np
@@ -22,12 +23,71 @@ class PromptValidationMetric(BaseMetric):
         self.ignore_index = int(ignore_index)
         self.num_bins = int(num_bins)
 
+    @staticmethod
+    def _pixel_tensor(sample: Mapping, key: str) -> torch.Tensor:
+        """Read PixelData after MMEngine Evaluator converts it to a dict."""
+        if not isinstance(sample, Mapping):
+            raise TypeError(
+                "PromptValidationMetric expects evaluator samples as mappings, "
+                f"but received {type(sample).__name__}"
+            )
+        if key not in sample:
+            raise KeyError(
+                f"PromptValidationMetric sample is missing {key!r}; "
+                f"available keys: {sorted(sample)}"
+            )
+        pixel_data = sample[key]
+        if isinstance(pixel_data, Mapping):
+            tensor = pixel_data.get("data")
+        else:
+            tensor = getattr(pixel_data, "data", None)
+        if not isinstance(tensor, torch.Tensor):
+            raise TypeError(
+                f"PromptValidationMetric expected {key!r}['data'] to be a "
+                f"Tensor, but received {type(tensor).__name__}"
+            )
+        return tensor
+
     def process(self, data_batch: dict, data_samples: list) -> None:
         for sample in data_samples:
-            score = sample.seg_logits.data.detach().float().cpu()
-            target = sample.gt_sem_seg.data.squeeze(0).detach().long().cpu()
-            prediction = sample.pred_sem_seg.data.squeeze(0).detach().long().cpu()
+            score = self._pixel_tensor(sample, "seg_logits").detach().float().cpu()
+            target = (
+                self._pixel_tensor(sample, "gt_sem_seg")
+                .squeeze(0)
+                .detach()
+                .long()
+                .cpu()
+            )
+            prediction = (
+                self._pixel_tensor(sample, "pred_sem_seg")
+                .squeeze(0)
+                .detach()
+                .long()
+                .cpu()
+            )
+            if score.ndim != 3:
+                raise ValueError(
+                    "seg_logits must have shape [C,H,W], got "
+                    f"{tuple(score.shape)}"
+                )
+            if target.shape != score.shape[-2:] or prediction.shape != target.shape:
+                raise ValueError(
+                    "Prompt validation spatial shapes disagree: "
+                    f"score={tuple(score.shape)}, target={tuple(target.shape)}, "
+                    f"prediction={tuple(prediction.shape)}"
+                )
             valid = target != self.ignore_index
+            if not valid.any():
+                raise ValueError(
+                    "Prompt validation sample contains no non-ignored pixels"
+                )
+            valid_target = target[valid]
+            if valid_target.min() < 0 or valid_target.max() >= score.shape[0]:
+                raise ValueError(
+                    "Prompt validation target ids fall outside the score "
+                    f"channels: min={int(valid_target.min())}, "
+                    f"max={int(valid_target.max())}, classes={score.shape[0]}"
+                )
             probability = score.clamp_min(1e-6)
             probability = probability / probability.sum(dim=0, keepdim=True).clamp_min(1e-6)
             confidence, soft_prediction = probability.max(dim=0)
@@ -57,7 +117,7 @@ class PromptValidationMetric(BaseMetric):
             one_hot = one_hot * valid_float
             dice_intersection = (probability64 * one_hot).sum(dim=(1, 2))
             dice_denominator = probability64.sum(dim=(1, 2)) + one_hot.sum(dim=(1, 2))
-            prompt_anchor = getattr(sample, "prompt_anchor", None)
+            prompt_anchor = sample.get("prompt_anchor")
             prompt_anchor_value = (
                 0.0
                 if prompt_anchor is None
