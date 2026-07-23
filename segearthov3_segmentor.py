@@ -18,6 +18,7 @@ from region_contrastive_readout import RegionContrastiveReadoutMixin
 from candidate_region_quality_diagnostic import (
     CandidateRegionQualityDiagnosticMixin,
 )
+from query_topology_diagnostic import QueryTopologyDiagnosticMixin
 from rethinking_reviewer import RethinkingReviewerMixin
 from concept_specificity_diagnostic import ConceptSpecificityDiagnosticMixin
 from cross_image_bank_diagnostic import CrossImageBankDiagnosticMixin
@@ -44,6 +45,7 @@ class SegEarthOV3Segmentation(
         Sam3GeometryRequeryDiagnosticMixin,
         ConceptSpecificityDiagnosticMixin,
         RethinkingReviewerMixin,
+        QueryTopologyDiagnosticMixin,
         CandidateRegionQualityDiagnosticMixin,
         RegionHypothesisDiagnosticMixin,
         RegionContrastiveReadoutMixin,
@@ -437,6 +439,21 @@ class SegEarthOV3Segmentation(
                  candidate_region_quality_semantic_max_per_class=32,
                  candidate_region_quality_hybrid_dedup_iou=0.90,
                  candidate_region_quality_fragment_coverage=0.10,
+                 dump_query_topology_stats=False,
+                 query_topology_stats_path=None,
+                 query_topology_max_side=256,
+                 query_topology_max_regions=256,
+                 query_topology_min_pixels=16,
+                 query_topology_support_threshold=0.05,
+                 query_topology_mask_threshold=0.50,
+                 query_topology_semantic_threshold=0.35,
+                 query_topology_action_min_overlap=0.05,
+                 query_topology_action_padding=4,
+                 query_topology_include_background=True,
+                 query_topology_save_npz=False,
+                 query_topology_artifact_dir=(
+                     'logs/query_topology/artifacts'),
+                 query_topology_max_saved_images=16,
                  dump_reviewer_cache=False,
                  reviewer_cache_dir=None,
                  reviewer_dataset_name=None,
@@ -1437,6 +1454,34 @@ class SegEarthOV3Segmentation(
         self.candidate_region_quality_fragment_coverage = float(
             candidate_region_quality_fragment_coverage)
         self._candidate_region_quality_stats_file = None
+        self.dump_query_topology_stats = bool(
+            dump_query_topology_stats)
+        self.query_topology_stats_path = query_topology_stats_path
+        self.query_topology_max_side = int(query_topology_max_side)
+        self.query_topology_max_regions = int(
+            query_topology_max_regions)
+        self.query_topology_min_pixels = int(
+            query_topology_min_pixels)
+        self.query_topology_support_threshold = float(
+            query_topology_support_threshold)
+        self.query_topology_mask_threshold = float(
+            query_topology_mask_threshold)
+        self.query_topology_semantic_threshold = float(
+            query_topology_semantic_threshold)
+        self.query_topology_action_min_overlap = float(
+            query_topology_action_min_overlap)
+        self.query_topology_action_padding = int(
+            query_topology_action_padding)
+        self.query_topology_include_background = bool(
+            query_topology_include_background)
+        self.query_topology_save_npz = bool(
+            query_topology_save_npz)
+        self.query_topology_artifact_dir = (
+            query_topology_artifact_dir)
+        self.query_topology_max_saved_images = int(
+            query_topology_max_saved_images)
+        self._query_topology_saved_images = 0
+        self._query_topology_stats_file = None
         self.dump_reviewer_cache = bool(dump_reviewer_cache)
         self.reviewer_cache_dir = reviewer_cache_dir
         self.reviewer_dataset_name = reviewer_dataset_name
@@ -1872,9 +1917,18 @@ class SegEarthOV3Segmentation(
         ]
         kept_indices = torch.nonzero(keep_mask.detach().bool(), as_tuple=False).flatten()
         if kept_indices.numel() > 0:
-            kept_presence = presence_scores.detach().float()[kept_indices]
-            kept_topk = min(topk, int(kept_indices.numel()))
-            selected.append(kept_indices[torch.topk(kept_presence, k=kept_topk).indices])
+            if self._uses_query_topology_diagnostic():
+                # Exact instance-head provenance requires every query that
+                # survived SAM3's confidence/presence filter.  Unkept queries
+                # remain bounded by raw_mask_oracle_topk.
+                selected.append(kept_indices)
+            else:
+                kept_presence = presence_scores.detach().float()[
+                    kept_indices]
+                kept_topk = min(topk, int(kept_indices.numel()))
+                selected.append(kept_indices[
+                    torch.topk(
+                        kept_presence, k=kept_topk).indices])
         selected_indices = torch.unique(torch.cat(selected)).to(torch.long)
 
         return dict(
@@ -1949,7 +2003,8 @@ class SegEarthOV3Segmentation(
                 or self._candidate_residual_miou_uses_raw_masks()
                 or self._uses_region_contrastive_readout()
                 or self._uses_region_hypothesis_v2()
-                or self._uses_candidate_region_quality_diagnostic())
+                or self._uses_candidate_region_quality_diagnostic()
+                or self._uses_query_topology_diagnostic())
             else None)
 
         with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -2178,6 +2233,7 @@ class SegEarthOV3Segmentation(
                 self._uses_region_contrastive_readout()
                 or self._uses_region_hypothesis_v2()
                 or self._uses_candidate_region_quality_diagnostic()
+                or self._uses_query_topology_diagnostic()
                 or self.dump_region_prompt_identity_stats)
             else None)
         presence_query_sum = (
@@ -16307,6 +16363,7 @@ class SegEarthOV3Segmentation(
                 or self._uses_region_contrastive_readout()
                 or self._uses_region_hypothesis_v2()
                 or self._uses_candidate_region_quality_diagnostic()
+                or self._uses_query_topology_diagnostic()
                 or self._uses_rethinking_reviewer()
                 or self._uses_ontology_self_verification()
                 or self._uses_evidence_enhancement()
@@ -16620,6 +16677,27 @@ class SegEarthOV3Segmentation(
                         base_seg_pred,
                         components,
                         data_samples[i],
+                    )
+                )
+
+            query_topology_context = None
+            if self._uses_query_topology_diagnostic():
+                if (
+                        query_semantic_logits is None
+                        or query_instance_logits is None):
+                    raise RuntimeError(
+                        'Query-topology diagnostic requires prompt-level '
+                        'semantic and instance maps.')
+                query_topology_context = (
+                    self._build_query_topology_diagnostic(
+                        base_seg_logits,
+                        base_seg_pred,
+                        query_seg_logits,
+                        query_semantic_logits,
+                        query_instance_logits,
+                        components,
+                        data_samples[i],
+                        image_path,
                     )
                 )
 
@@ -18286,6 +18364,29 @@ class SegEarthOV3Segmentation(
                         candidate_region_quality_context),
                 )
                 self._write_candidate_region_quality_stats(record)
+
+            if self.dump_query_topology_stats:
+                record = dict(
+                    rank=int(os.environ.get('RANK', 0)),
+                    local_rank=int(os.environ.get('LOCAL_RANK', 0)),
+                    img_path=image_path,
+                    ori_shape=list(ori_shape),
+                    image_size=list(image.size),
+                    dataset_name=self.seed_dataset_name,
+                    prob_thd=float(self.prob_thd),
+                    confidence_threshold=float(
+                        self.confidence_threshold),
+                    instance_score_type=str(self.instance_score_type),
+                    use_presence_score=bool(self.use_presence_score),
+                    query_topology_max_side=int(
+                        self.query_topology_max_side),
+                    query_topology_support_threshold=float(
+                        self.query_topology_support_threshold),
+                    query_topology_mask_threshold=float(
+                        self.query_topology_mask_threshold),
+                    query_topology_stats=query_topology_context,
+                )
+                self._write_query_topology_stats(record)
 
             if self.dump_state_action_atlas_stats:
                 record = dict(

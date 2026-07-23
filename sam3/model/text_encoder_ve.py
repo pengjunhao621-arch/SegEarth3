@@ -228,45 +228,14 @@ class TextTransformer(nn.Module):
     def forward(
         self, text: torch.Tensor
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        inputs_embeds = self.token_embedding(
-            text
-        )  # [batch_size, n_ctx, d_model]
-        return self.forward_embeddings(text, inputs_embeds)
-
-    def forward_embeddings(
-        self,
-        text: torch.Tensor,
-        inputs_embeds: torch.Tensor,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """Encode externally supplied token embeddings.
-
-        ``forward`` remains the unchanged token-id baseline.  This explicit
-        entry point is used by the optional prompt-synthesis experiment so
-        gradients can flow from SAM3's grounding heads into continuous prompt
-        residuals while every SAM3 parameter stays frozen.
-        """
-        if inputs_embeds.ndim != 3:
-            raise ValueError(
-                "inputs_embeds must have shape [batch, sequence, width], "
-                f"but got {tuple(inputs_embeds.shape)}"
-            )
-        if inputs_embeds.shape[:2] != text.shape:
-            raise ValueError(
-                "text ids and inputs_embeds must share batch/sequence axes, "
-                f"but got {tuple(text.shape)} and "
-                f"{tuple(inputs_embeds.shape)}"
-            )
-
         seq_len = text.shape[1]
-        x = inputs_embeds
+        x = self.token_embedding(text)  # [batch_size, n_ctx, d_model]
 
         attn_mask = self.attn_mask
         if attn_mask is not None:
             attn_mask = attn_mask[:seq_len, :seq_len]
 
-        x = x + self.positional_embedding[:seq_len].to(
-            device=x.device, dtype=x.dtype
-        )
+        x = x + self.positional_embedding[:seq_len]
         x = self.transformer(x, attn_mask=attn_mask)
 
         x = self.ln_final(x)
@@ -352,33 +321,6 @@ class VETextEncoder(nn.Module):
             ), "Can't replace boxes in text if it's already encoded"
 
         # Note that the input_embeds are returned in pytorch's convention (sequence first)
-        return (
-            text_attention_mask,
-            text_memory_resized,
-            inputs_embeds.transpose(0, 1),
-        )
-
-    def forward_embeddings(
-        self,
-        tokenized: torch.Tensor,
-        inputs_embeds: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Run the frozen text transformer on continuous token embeddings.
-
-        Args:
-            tokenized: Original token ids, used for padding and EOT positions.
-            inputs_embeds: Static token embeddings plus learned residuals, with
-                shape ``[batch, context_length, encoder_width]``.
-
-        Returns:
-            The same three tensors and conventions as :meth:`forward`.
-        """
-        text_attention_mask = (tokenized != 0).bool().ne(1)
-        _, text_memory = self.encoder.forward_embeddings(
-            tokenized, inputs_embeds
-        )
-        text_memory = text_memory.transpose(0, 1)
-        text_memory_resized = self.resizer(text_memory)
         return (
             text_attention_mask,
             text_memory_resized,
