@@ -28,6 +28,10 @@ ENV/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local GitNexus code-knowledge graph. Rebuild it from tracked source instead
+# of publishing the machine-specific database and registry metadata.
+/.gitnexus/
 *.swp
 *.swo
 

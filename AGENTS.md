@@ -618,3 +618,30 @@ Never sacrifice research honesty for a more impressive-looking answer.
 8. 如果远程分支已经领先或发生分叉，禁止 force push、reset 或覆盖历史；停止推送并向用户说明。
 9. 每次推送完成后报告提交摘要、commit hash 和验证结果。
 10. 只在一次完整任务完成后推送，不要为每个微小编辑创建零散提交。
+
+---
+
+## 16. GitNexus 知识图谱维护规则
+
+本项目在本机使用 GitNexus 代码知识图谱辅助代码理解、调试、影响分析和
+重构。图谱是辅助索引，不替代源代码、测试结果或论文证据。
+
+1. `.gitnexus/` 是本机生成的数据库，不得提交到 GitHub，也不需要复制到
+   远程训练服务器。
+2. 开始较大规模的代码阅读、调试、重构或实现任务前，先运行
+   `bash tools/maintain_gitnexus.sh status`；图谱缺失或过期时运行
+   `bash tools/maintain_gitnexus.sh refresh`。
+3. 优先使用 GitNexus 的 query/context/impact/detect_changes/PDG 能力定位
+   执行流、调用关系和潜在影响，但关键结论仍须回到实际代码和测试验证。
+4. 完成代码修改并通过最低限度验证后、提交前，使用 GitNexus
+   `detect_changes` 检查本次 diff 影响的符号和执行流；不得把图谱结果当作
+   唯一安全证明。
+5. 每个完整任务提交完成后运行
+   `bash tools/maintain_gitnexus.sh refresh`，使本地图谱对应新的 commit。
+   这属于任务边界上的增量维护，不承诺后台逐字符实时更新。
+6. 项目固定使用 PDG、纯索引模式和 1024 KB 源码上限，以纳入
+   `segearthov3_segmentor.py`；默认不生成 embeddings。
+7. 只有用户明确批准向量模型或外部 embedding 服务后，才允许启用
+   `--embeddings`。不得因图谱维护上传数据集、权重、日志或敏感信息。
+8. 新机器或全新 clone 没有图谱时，运行
+   `bash tools/maintain_gitnexus.sh refresh` 自动完成首次构建。
