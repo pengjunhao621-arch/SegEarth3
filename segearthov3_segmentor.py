@@ -18,6 +18,10 @@ from region_contrastive_readout import RegionContrastiveReadoutMixin
 from candidate_region_quality_diagnostic import (
     CandidateRegionQualityDiagnosticMixin,
 )
+from presence_allocation_diagnostic import (
+    PresenceAllocationDiagnosticMixin,
+    VARIANT_NAMES as PRESENCE_ALLOCATION_VARIANTS,
+)
 from query_topology_diagnostic import QueryTopologyDiagnosticMixin
 from rethinking_reviewer import RethinkingReviewerMixin
 from concept_specificity_diagnostic import ConceptSpecificityDiagnosticMixin
@@ -45,6 +49,7 @@ class SegEarthOV3Segmentation(
         Sam3GeometryRequeryDiagnosticMixin,
         ConceptSpecificityDiagnosticMixin,
         RethinkingReviewerMixin,
+        PresenceAllocationDiagnosticMixin,
         QueryTopologyDiagnosticMixin,
         CandidateRegionQualityDiagnosticMixin,
         RegionHypothesisDiagnosticMixin,
@@ -439,6 +444,20 @@ class SegEarthOV3Segmentation(
                  candidate_region_quality_semantic_max_per_class=32,
                  candidate_region_quality_hybrid_dedup_iou=0.90,
                  candidate_region_quality_fragment_coverage=0.10,
+                 dump_presence_allocation_stats=False,
+                 presence_allocation_stats_path=None,
+                 presence_allocation_dataset_name=None,
+                 presence_allocation_raw_gate_threshold=None,
+                 presence_allocation_support_threshold=0.05,
+                 presence_allocation_chunk_size=16,
+                 presence_allocation_logit_eps=1e-4,
+                 presence_allocation_strict_integrity=True,
+                 presence_allocation_integrity_tolerance=1e-5,
+                 presence_allocation_save_npz=False,
+                 presence_allocation_artifact_dir=(
+                     'logs/presence_allocation/artifacts'),
+                 presence_allocation_artifact_max_side=128,
+                 presence_allocation_max_saved_images=24,
                  dump_query_topology_stats=False,
                  query_topology_stats_path=None,
                  query_topology_max_side=256,
@@ -1454,6 +1473,34 @@ class SegEarthOV3Segmentation(
         self.candidate_region_quality_fragment_coverage = float(
             candidate_region_quality_fragment_coverage)
         self._candidate_region_quality_stats_file = None
+        self.dump_presence_allocation_stats = bool(
+            dump_presence_allocation_stats)
+        self.presence_allocation_stats_path = (
+            presence_allocation_stats_path)
+        self.presence_allocation_dataset_name = (
+            presence_allocation_dataset_name)
+        self.presence_allocation_raw_gate_threshold = (
+            presence_allocation_raw_gate_threshold)
+        self.presence_allocation_support_threshold = float(
+            presence_allocation_support_threshold)
+        self.presence_allocation_chunk_size = int(
+            presence_allocation_chunk_size)
+        self.presence_allocation_logit_eps = float(
+            presence_allocation_logit_eps)
+        self.presence_allocation_strict_integrity = bool(
+            presence_allocation_strict_integrity)
+        self.presence_allocation_integrity_tolerance = float(
+            presence_allocation_integrity_tolerance)
+        self.presence_allocation_save_npz = bool(
+            presence_allocation_save_npz)
+        self.presence_allocation_artifact_dir = (
+            presence_allocation_artifact_dir)
+        self.presence_allocation_artifact_max_side = int(
+            presence_allocation_artifact_max_side)
+        self.presence_allocation_max_saved_images = int(
+            presence_allocation_max_saved_images)
+        self._presence_allocation_saved_images = 0
+        self._presence_allocation_stats_file = None
         self.dump_query_topology_stats = bool(
             dump_query_topology_stats)
         self.query_topology_stats_path = query_topology_stats_path
@@ -1956,6 +2003,25 @@ class SegEarthOV3Segmentation(
         instance_logits_all = (
             torch.zeros((self.num_queries, h, w), device=self.device)
             if return_components else None)
+        presence_allocation_query_logits = (
+            {
+                name: torch.zeros(
+                    (self.num_queries, h, w),
+                    device=self.device,
+                    dtype=torch.float32,
+                )
+                for name in PRESENCE_ALLOCATION_VARIANTS
+            }
+            if (
+                return_components
+                and self._uses_presence_allocation_diagnostic())
+            else None)
+        presence_allocation_prompt_stats = (
+            []
+            if (
+                return_components
+                and self._uses_presence_allocation_diagnostic())
+            else None)
         internal_diag_shape = (
             self._internal_selection_diag_shape(h, w)
             if return_components and self._uses_internal_evidence_diagnostics()
@@ -1971,7 +2037,8 @@ class SegEarthOV3Segmentation(
                 or self._uses_residual_background_modeling()
                 or self.dump_prompt_winner_attribution_stats
                 or self._uses_cross_image_bank_features()
-                or self._uses_ontology_self_verification())
+                or self._uses_ontology_self_verification()
+                or self._uses_presence_allocation_diagnostic())
             else None)
         raw_query_maps = {}
         if internal_diag_shape is not None:
@@ -2117,8 +2184,7 @@ class SegEarthOV3Segmentation(
                             ).squeeze()
                     
                     seg_logits[query_idx] = torch.max(seg_logits[query_idx], semantic_logits)
-                    if return_stats:
-                        semantic_component = semantic_logits
+                    semantic_component = semantic_logits
                     if return_components:
                         semantic_logits_all[query_idx] = semantic_logits
 
@@ -2127,6 +2193,36 @@ class SegEarthOV3Segmentation(
                 
                 if self.use_presence_score:
                     seg_logits[query_idx] = seg_logits[query_idx] * inference_state["presence_score"]
+
+                if presence_allocation_query_logits is not None:
+                    if (
+                            semantic_component is None
+                            or instance_component is None):
+                        raise RuntimeError(
+                            'Presence-allocation audit requires semantic and '
+                            'instance maps for every prompt.')
+                    (
+                        prompt_variants,
+                        presence_allocation_prompt_stat,
+                    ) = self._pa_build_prompt_variants(
+                        inference_state,
+                        semantic_component,
+                        instance_component,
+                        seg_logits[query_idx],
+                        (h, w),
+                    )
+                    for variant_name, variant_map in prompt_variants.items():
+                        presence_allocation_query_logits[
+                            variant_name][query_idx] = variant_map
+                    presence_allocation_prompt_stat.update(dict(
+                        query_index=int(query_idx),
+                        class_index=int(self.query_idx[query_idx].item()),
+                        prompt=str(query_word),
+                        view_id=view_id,
+                        crop_box=crop_box,
+                    ))
+                    presence_allocation_prompt_stats.append(
+                        presence_allocation_prompt_stat)
 
                 if return_stats:
                     prompt_stats.append(self._build_prompt_evidence_stats(
@@ -2162,6 +2258,16 @@ class SegEarthOV3Segmentation(
         if return_components and presence_query_scores is not None:
             components['presence_query_scores'] = (
                 presence_query_scores.detach())
+        if (
+                return_components
+                and presence_allocation_query_logits is not None):
+            components['presence_allocation_query_logits'] = {
+                name: values.detach()
+                for name, values in
+                presence_allocation_query_logits.items()
+            }
+            components['presence_allocation_prompt_stats'] = (
+                presence_allocation_prompt_stats)
         if return_components and internal_diag_shape is not None:
             (
                 internal_maps,
@@ -2214,6 +2320,23 @@ class SegEarthOV3Segmentation(
         instance_preds = (
             torch.zeros((self.num_queries, h_img, w_img), device=self.device)
             if return_components else None)
+        presence_allocation_preds = (
+            {
+                name: torch.zeros(
+                    (self.num_queries, h_img, w_img),
+                    device=self.device,
+                    dtype=torch.float32,
+                )
+                for name in PRESENCE_ALLOCATION_VARIANTS
+            }
+            if (
+                return_components
+                and self._uses_presence_allocation_diagnostic())
+            else None)
+        presence_allocation_prompt_stats = (
+            []
+            if presence_allocation_preds is not None
+            else None)
         coco_sec_prior_preds = (
             torch.zeros((self.num_cls, h_img, w_img), device=self.device)
             if return_components
@@ -2250,7 +2373,8 @@ class SegEarthOV3Segmentation(
                 or self._uses_residual_background_modeling()
                 or self.dump_prompt_winner_attribution_stats
                 or self._uses_cross_image_bank_features()
-                or self._uses_ontology_self_verification())
+                or self._uses_ontology_self_verification()
+                or self._uses_presence_allocation_diagnostic())
             else None)
         presence_query_views = 0
         
@@ -2306,6 +2430,20 @@ class SegEarthOV3Segmentation(
                 if return_components:
                     semantic_preds[:, y1:y2, x1:x2] += crop_components['semantic_logits']
                     instance_preds[:, y1:y2, x1:x2] += crop_components['instance_logits']
+                    if presence_allocation_preds is not None:
+                        crop_variants = crop_components.get(
+                            'presence_allocation_query_logits')
+                        if not isinstance(crop_variants, dict):
+                            raise RuntimeError(
+                                'Sliding presence-allocation audit is '
+                                'missing crop variants.')
+                        for variant_name in PRESENCE_ALLOCATION_VARIANTS:
+                            presence_allocation_preds[
+                                variant_name][:, y1:y2, x1:x2] += (
+                                    crop_variants[variant_name])
+                        presence_allocation_prompt_stats.extend(
+                            crop_components.get(
+                                'presence_allocation_prompt_stats', []))
                     if raw_mask_candidates is not None:
                         raw_mask_candidates.extend(
                             crop_components.get(
@@ -2367,6 +2505,11 @@ class SegEarthOV3Segmentation(
         if return_components:
             semantic_preds = semantic_preds / count_mat
             instance_preds = instance_preds / count_mat
+            if presence_allocation_preds is not None:
+                for variant_name in PRESENCE_ALLOCATION_VARIANTS:
+                    presence_allocation_preds[variant_name] = (
+                        presence_allocation_preds[variant_name]
+                        / count_mat)
             if coco_sec_prior_preds is not None:
                 coco_sec_prior_preds = coco_sec_prior_preds / count_mat
                 coco_sec_prior_preds = coco_sec_prior_preds.clamp_min(
@@ -2391,6 +2534,13 @@ class SegEarthOV3Segmentation(
             components['coco_sec_prior'] = coco_sec_prior_preds
         if return_components and raw_mask_candidates is not None:
             components['raw_mask_candidates'] = raw_mask_candidates
+        if (
+                return_components
+                and presence_allocation_preds is not None):
+            components['presence_allocation_query_logits'] = (
+                presence_allocation_preds)
+            components['presence_allocation_prompt_stats'] = (
+                presence_allocation_prompt_stats)
         if (
                 return_components
                 and presence_query_sum is not None
@@ -16363,6 +16513,7 @@ class SegEarthOV3Segmentation(
                 or self._uses_region_contrastive_readout()
                 or self._uses_region_hypothesis_v2()
                 or self._uses_candidate_region_quality_diagnostic()
+                or self._uses_presence_allocation_diagnostic()
                 or self._uses_query_topology_diagnostic()
                 or self._uses_rethinking_reviewer()
                 or self._uses_ontology_self_verification()
@@ -16415,6 +16566,17 @@ class SegEarthOV3Segmentation(
                             mode='bilinear',
                             align_corners=False
                         ).squeeze(0)
+                    presence_variants = components.get(
+                        'presence_allocation_query_logits')
+                    if isinstance(presence_variants, dict):
+                        for variant_name, variant_logits in list(
+                                presence_variants.items()):
+                            presence_variants[variant_name] = F.interpolate(
+                                variant_logits.unsqueeze(0),
+                                size=ori_shape,
+                                mode='bilinear',
+                                align_corners=False,
+                            ).squeeze(0)
 
             # Post-processing
             query_seg_logits = seg_logits
@@ -16452,6 +16614,18 @@ class SegEarthOV3Segmentation(
                     seg_logits = coco_sec_logits
 
             base_seg_pred = self._threshold_with_reject_recovery(base_seg_logits, components)
+            presence_allocation_context = None
+            if self._uses_presence_allocation_diagnostic():
+                presence_allocation_context = (
+                    self._build_presence_allocation_diagnostic(
+                        base_seg_logits,
+                        base_seg_pred,
+                        query_seg_logits,
+                        components,
+                        data_samples[i],
+                        image_path,
+                    )
+                )
             evidence_enhancement_context = None
             evidence_enhancement_logits = None
             evidence_enhancement_pred = None
