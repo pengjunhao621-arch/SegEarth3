@@ -1,0 +1,58 @@
+"""Dependency-free schema and graph definitions for fusion diagnostics."""
+
+
+SCHEMA_VERSION = 'dual-head-fusion-bank-v1'
+
+VARIANT_NAMES = (
+    'semantic_only',
+    'instance_p0_path',
+    'p1_role_once',
+    'winner_score_once',
+    'proc_pgrf',
+    'proc_gate_debiased',
+    'proc_role_once',
+    'uni_rcrf_floor',
+    'uni_rcrf_region',
+    'uni_rcrf_unfloored',
+    'bi_s2i_only',
+    'bi_i2s_only',
+    'bi_full',
+    'soft_or',
+    'convex_25',
+    'boundary_residual',
+    'interior_residual',
+    'raw_mask_residual',
+)
+
+CONTRASTS = (
+    ('p0_baseline', 'p1_role_once',
+     'remove_duplicate_continuous_presence'),
+    ('p0_baseline', 'proc_pgrf',
+     'official_proc_sam3_pgrf_on_native_candidates'),
+    ('proc_pgrf', 'proc_gate_debiased',
+     'remove_repeated_presence_from_proc_gate'),
+    ('proc_gate_debiased', 'proc_role_once',
+     'remove_repeated_presence_from_proc_instance_map'),
+    ('p1_role_once', 'uni_rcrf_floor',
+     'floored_value_agreement'),
+    ('uni_rcrf_floor', 'uni_rcrf_region',
+     'inside_ring_contradiction_attenuation'),
+    ('uni_rcrf_floor', 'uni_rcrf_unfloored',
+     'allow_full_disagreement_suppression'),
+    ('uni_rcrf_floor', 'bi_s2i_only',
+     'semantic_to_object_score_only'),
+    ('uni_rcrf_floor', 'bi_i2s_only',
+     'instance_to_semantic_boundary_only'),
+    ('uni_rcrf_floor', 'bi_full',
+     'bidirectional_role_consistent_interaction'),
+    ('p1_role_once', 'soft_or',
+     'max_residual_vs_probabilistic_union'),
+    ('p1_role_once', 'convex_25',
+     'protected_base_vs_naive_convex_blend'),
+    ('p1_role_once', 'boundary_residual',
+     'residual_boundary_contribution'),
+    ('p1_role_once', 'interior_residual',
+     'residual_interior_contribution'),
+    ('p1_role_once', 'raw_mask_residual',
+     'remove_object_score_amplitude'),
+)

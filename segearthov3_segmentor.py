@@ -22,6 +22,10 @@ from presence_allocation_diagnostic import (
     PresenceAllocationDiagnosticMixin,
     VARIANT_NAMES as PRESENCE_ALLOCATION_VARIANTS,
 )
+from dual_head_fusion_diagnostic import (
+    DualHeadFusionDiagnosticMixin,
+    VARIANT_NAMES as DUAL_HEAD_FUSION_VARIANTS,
+)
 from query_topology_diagnostic import QueryTopologyDiagnosticMixin
 from rethinking_reviewer import RethinkingReviewerMixin
 from concept_specificity_diagnostic import ConceptSpecificityDiagnosticMixin
@@ -49,6 +53,7 @@ class SegEarthOV3Segmentation(
         Sam3GeometryRequeryDiagnosticMixin,
         ConceptSpecificityDiagnosticMixin,
         RethinkingReviewerMixin,
+        DualHeadFusionDiagnosticMixin,
         PresenceAllocationDiagnosticMixin,
         QueryTopologyDiagnosticMixin,
         CandidateRegionQualityDiagnosticMixin,
@@ -458,6 +463,28 @@ class SegEarthOV3Segmentation(
                      'logs/presence_allocation/artifacts'),
                  presence_allocation_artifact_max_side=128,
                  presence_allocation_max_saved_images=24,
+                 dump_dual_head_fusion_stats=False,
+                 dual_head_fusion_stats_path=None,
+                 dual_head_fusion_dataset_name=None,
+                 dual_head_fusion_chunk_size=8,
+                 dual_head_fusion_ring_kernel=7,
+                 dual_head_fusion_mask_threshold=0.50,
+                 dual_head_fusion_support_threshold=0.05,
+                 dual_head_fusion_agreement_gamma=0.50,
+                 dual_head_fusion_eta=0.25,
+                 dual_head_fusion_beta=0.25,
+                 dual_head_fusion_eps=1e-6,
+                 dual_head_fusion_high_agreement_evidence=0.25,
+                 dual_head_fusion_high_agreement_gaps='0.05,0.10,0.20',
+                 dual_head_fusion_low_presence_threshold=0.25,
+                 dual_head_fusion_low_object_threshold=0.50,
+                 dual_head_fusion_strict_integrity=True,
+                 dual_head_fusion_integrity_tolerance=1e-5,
+                 dual_head_fusion_save_npz=False,
+                 dual_head_fusion_artifact_dir=(
+                     'logs/dual_head_fusion/artifacts'),
+                 dual_head_fusion_artifact_max_side=128,
+                 dual_head_fusion_max_saved_images=16,
                  dump_query_topology_stats=False,
                  query_topology_stats_path=None,
                  query_topology_max_side=256,
@@ -1501,6 +1528,50 @@ class SegEarthOV3Segmentation(
             presence_allocation_max_saved_images)
         self._presence_allocation_saved_images = 0
         self._presence_allocation_stats_file = None
+        self.dump_dual_head_fusion_stats = bool(
+            dump_dual_head_fusion_stats)
+        self.dual_head_fusion_stats_path = (
+            dual_head_fusion_stats_path)
+        self.dual_head_fusion_dataset_name = (
+            dual_head_fusion_dataset_name)
+        self.dual_head_fusion_chunk_size = int(
+            dual_head_fusion_chunk_size)
+        self.dual_head_fusion_ring_kernel = int(
+            dual_head_fusion_ring_kernel)
+        self.dual_head_fusion_mask_threshold = float(
+            dual_head_fusion_mask_threshold)
+        self.dual_head_fusion_support_threshold = float(
+            dual_head_fusion_support_threshold)
+        self.dual_head_fusion_agreement_gamma = float(
+            dual_head_fusion_agreement_gamma)
+        self.dual_head_fusion_eta = float(
+            dual_head_fusion_eta)
+        self.dual_head_fusion_beta = float(
+            dual_head_fusion_beta)
+        self.dual_head_fusion_eps = float(
+            dual_head_fusion_eps)
+        self.dual_head_fusion_high_agreement_evidence = float(
+            dual_head_fusion_high_agreement_evidence)
+        self.dual_head_fusion_high_agreement_gaps = str(
+            dual_head_fusion_high_agreement_gaps)
+        self.dual_head_fusion_low_presence_threshold = float(
+            dual_head_fusion_low_presence_threshold)
+        self.dual_head_fusion_low_object_threshold = float(
+            dual_head_fusion_low_object_threshold)
+        self.dual_head_fusion_strict_integrity = bool(
+            dual_head_fusion_strict_integrity)
+        self.dual_head_fusion_integrity_tolerance = float(
+            dual_head_fusion_integrity_tolerance)
+        self.dual_head_fusion_save_npz = bool(
+            dual_head_fusion_save_npz)
+        self.dual_head_fusion_artifact_dir = (
+            dual_head_fusion_artifact_dir)
+        self.dual_head_fusion_artifact_max_side = int(
+            dual_head_fusion_artifact_max_side)
+        self.dual_head_fusion_max_saved_images = int(
+            dual_head_fusion_max_saved_images)
+        self._dual_head_fusion_saved_images = 0
+        self._dual_head_fusion_stats_file = None
         self.dump_query_topology_stats = bool(
             dump_query_topology_stats)
         self.query_topology_stats_path = query_topology_stats_path
@@ -2022,6 +2093,23 @@ class SegEarthOV3Segmentation(
                 return_components
                 and self._uses_presence_allocation_diagnostic())
             else None)
+        dual_head_fusion_query_logits = (
+            {
+                name: torch.zeros(
+                    (self.num_queries, h, w),
+                    device=self.device,
+                    dtype=torch.float32,
+                )
+                for name in DUAL_HEAD_FUSION_VARIANTS
+            }
+            if (
+                return_components
+                and self._uses_dual_head_fusion_diagnostic())
+            else None)
+        dual_head_fusion_prompt_stats = (
+            []
+            if dual_head_fusion_query_logits is not None
+            else None)
         internal_diag_shape = (
             self._internal_selection_diag_shape(h, w)
             if return_components and self._uses_internal_evidence_diagnostics()
@@ -2038,7 +2126,8 @@ class SegEarthOV3Segmentation(
                 or self.dump_prompt_winner_attribution_stats
                 or self._uses_cross_image_bank_features()
                 or self._uses_ontology_self_verification()
-                or self._uses_presence_allocation_diagnostic())
+                or self._uses_presence_allocation_diagnostic()
+                or self._uses_dual_head_fusion_diagnostic())
             else None)
         raw_query_maps = {}
         if internal_diag_shape is not None:
@@ -2224,6 +2313,37 @@ class SegEarthOV3Segmentation(
                     presence_allocation_prompt_stats.append(
                         presence_allocation_prompt_stat)
 
+                if dual_head_fusion_query_logits is not None:
+                    if (
+                            semantic_component is None
+                            or instance_component is None):
+                        raise RuntimeError(
+                            'Dual-head fusion bank requires semantic and '
+                            'instance maps for every prompt.')
+                    (
+                        prompt_variants,
+                        prompt_fusion_stats,
+                    ) = self._dhf_build_prompt_variants(
+                        inference_state,
+                        semantic_component,
+                        instance_component,
+                        seg_logits[query_idx],
+                        (h, w),
+                    )
+                    for variant_name, variant_map in prompt_variants.items():
+                        dual_head_fusion_query_logits[
+                            variant_name][query_idx] = variant_map
+                    class_index = int(self.query_idx[query_idx].item())
+                    prompt_fusion_stats.update(dict(
+                        query_index=int(query_idx),
+                        class_index=class_index,
+                        prompt=str(query_word),
+                        view_id=view_id,
+                        crop_box=crop_box,
+                    ))
+                    dual_head_fusion_prompt_stats.append(
+                        prompt_fusion_stats)
+
                 if return_stats:
                     prompt_stats.append(self._build_prompt_evidence_stats(
                         query_idx=query_idx,
@@ -2268,6 +2388,16 @@ class SegEarthOV3Segmentation(
             }
             components['presence_allocation_prompt_stats'] = (
                 presence_allocation_prompt_stats)
+        if (
+                return_components
+                and dual_head_fusion_query_logits is not None):
+            components['dual_head_fusion_query_logits'] = {
+                name: values.detach()
+                for name, values in
+                dual_head_fusion_query_logits.items()
+            }
+            components['dual_head_fusion_prompt_stats'] = (
+                dual_head_fusion_prompt_stats)
         if return_components and internal_diag_shape is not None:
             (
                 internal_maps,
@@ -2337,6 +2467,23 @@ class SegEarthOV3Segmentation(
             []
             if presence_allocation_preds is not None
             else None)
+        dual_head_fusion_preds = (
+            {
+                name: torch.zeros(
+                    (self.num_queries, h_img, w_img),
+                    device=self.device,
+                    dtype=torch.float32,
+                )
+                for name in DUAL_HEAD_FUSION_VARIANTS
+            }
+            if (
+                return_components
+                and self._uses_dual_head_fusion_diagnostic())
+            else None)
+        dual_head_fusion_prompt_stats = (
+            []
+            if dual_head_fusion_preds is not None
+            else None)
         coco_sec_prior_preds = (
             torch.zeros((self.num_cls, h_img, w_img), device=self.device)
             if return_components
@@ -2374,7 +2521,8 @@ class SegEarthOV3Segmentation(
                 or self.dump_prompt_winner_attribution_stats
                 or self._uses_cross_image_bank_features()
                 or self._uses_ontology_self_verification()
-                or self._uses_presence_allocation_diagnostic())
+                or self._uses_presence_allocation_diagnostic()
+                or self._uses_dual_head_fusion_diagnostic())
             else None)
         presence_query_views = 0
         
@@ -2444,6 +2592,20 @@ class SegEarthOV3Segmentation(
                         presence_allocation_prompt_stats.extend(
                             crop_components.get(
                                 'presence_allocation_prompt_stats', []))
+                    if dual_head_fusion_preds is not None:
+                        crop_variants = crop_components.get(
+                            'dual_head_fusion_query_logits')
+                        if not isinstance(crop_variants, dict):
+                            raise RuntimeError(
+                                'Sliding dual-head fusion bank is missing '
+                                'crop variants.')
+                        for variant_name in DUAL_HEAD_FUSION_VARIANTS:
+                            dual_head_fusion_preds[
+                                variant_name][:, y1:y2, x1:x2] += (
+                                    crop_variants[variant_name])
+                        dual_head_fusion_prompt_stats.extend(
+                            crop_components.get(
+                                'dual_head_fusion_prompt_stats', []))
                     if raw_mask_candidates is not None:
                         raw_mask_candidates.extend(
                             crop_components.get(
@@ -2510,6 +2672,11 @@ class SegEarthOV3Segmentation(
                     presence_allocation_preds[variant_name] = (
                         presence_allocation_preds[variant_name]
                         / count_mat)
+            if dual_head_fusion_preds is not None:
+                for variant_name in DUAL_HEAD_FUSION_VARIANTS:
+                    dual_head_fusion_preds[variant_name] = (
+                        dual_head_fusion_preds[variant_name]
+                        / count_mat)
             if coco_sec_prior_preds is not None:
                 coco_sec_prior_preds = coco_sec_prior_preds / count_mat
                 coco_sec_prior_preds = coco_sec_prior_preds.clamp_min(
@@ -2541,6 +2708,13 @@ class SegEarthOV3Segmentation(
                 presence_allocation_preds)
             components['presence_allocation_prompt_stats'] = (
                 presence_allocation_prompt_stats)
+        if (
+                return_components
+                and dual_head_fusion_preds is not None):
+            components['dual_head_fusion_query_logits'] = (
+                dual_head_fusion_preds)
+            components['dual_head_fusion_prompt_stats'] = (
+                dual_head_fusion_prompt_stats)
         if (
                 return_components
                 and presence_query_sum is not None
@@ -16514,6 +16688,7 @@ class SegEarthOV3Segmentation(
                 or self._uses_region_hypothesis_v2()
                 or self._uses_candidate_region_quality_diagnostic()
                 or self._uses_presence_allocation_diagnostic()
+                or self._uses_dual_head_fusion_diagnostic()
                 or self._uses_query_topology_diagnostic()
                 or self._uses_rethinking_reviewer()
                 or self._uses_ontology_self_verification()
@@ -16577,6 +16752,17 @@ class SegEarthOV3Segmentation(
                                 mode='bilinear',
                                 align_corners=False,
                             ).squeeze(0)
+                    fusion_variants = components.get(
+                        'dual_head_fusion_query_logits')
+                    if isinstance(fusion_variants, dict):
+                        for variant_name, variant_logits in list(
+                                fusion_variants.items()):
+                            fusion_variants[variant_name] = F.interpolate(
+                                variant_logits.unsqueeze(0),
+                                size=ori_shape,
+                                mode='bilinear',
+                                align_corners=False,
+                            ).squeeze(0)
 
             # Post-processing
             query_seg_logits = seg_logits
@@ -16592,6 +16778,14 @@ class SegEarthOV3Segmentation(
                 for key, value in components.items():
                     if key in ('semantic_logits', 'instance_logits'):
                         aggregated_components[key] = self._aggregate_query_logits_to_classes(value)
+                    elif key == 'dual_head_fusion_query_logits':
+                        aggregated_components[
+                            'dual_head_fusion_class_logits'
+                        ] = {
+                            name: self._aggregate_query_logits_to_classes(
+                                query_logits)
+                            for name, query_logits in value.items()
+                        }
                     elif key == 'presence_query_scores':
                         aggregated_components['presence_scores'] = (
                             self._aggregate_query_scores_to_classes(value))
@@ -16618,6 +16812,18 @@ class SegEarthOV3Segmentation(
             if self._uses_presence_allocation_diagnostic():
                 presence_allocation_context = (
                     self._build_presence_allocation_diagnostic(
+                        base_seg_logits,
+                        base_seg_pred,
+                        query_seg_logits,
+                        components,
+                        data_samples[i],
+                        image_path,
+                    )
+                )
+            dual_head_fusion_context = None
+            if self._uses_dual_head_fusion_diagnostic():
+                dual_head_fusion_context = (
+                    self._build_dual_head_fusion_diagnostic(
                         base_seg_logits,
                         base_seg_pred,
                         query_seg_logits,
