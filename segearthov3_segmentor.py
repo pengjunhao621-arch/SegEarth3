@@ -2097,7 +2097,7 @@ class SegEarthOV3Segmentation(
             {
                 name: torch.zeros(
                     (self.num_queries, h, w),
-                    device=self.device,
+                    device='cpu',
                     dtype=torch.float32,
                 )
                 for name in DUAL_HEAD_FUSION_VARIANTS
@@ -2343,6 +2343,13 @@ class SegEarthOV3Segmentation(
                     ))
                     dual_head_fusion_prompt_stats.append(
                         prompt_fusion_stats)
+                    # The formula bank returns CPU float32 maps. Drop all
+                    # references before the next text grounding call so the
+                    # previous prompt cannot raise SAM3's CUDA peak.
+                    del prompt_variants
+                    del variant_map
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
                 if return_stats:
                     prompt_stats.append(self._build_prompt_evidence_stats(
@@ -2471,7 +2478,7 @@ class SegEarthOV3Segmentation(
             {
                 name: torch.zeros(
                     (self.num_queries, h_img, w_img),
-                    device=self.device,
+                    device='cpu',
                     dtype=torch.float32,
                 )
                 for name in DUAL_HEAD_FUSION_VARIANTS
@@ -2673,10 +2680,11 @@ class SegEarthOV3Segmentation(
                         presence_allocation_preds[variant_name]
                         / count_mat)
             if dual_head_fusion_preds is not None:
+                dual_head_count_mat = count_mat.detach().float().cpu()
                 for variant_name in DUAL_HEAD_FUSION_VARIANTS:
                     dual_head_fusion_preds[variant_name] = (
                         dual_head_fusion_preds[variant_name]
-                        / count_mat)
+                        / dual_head_count_mat)
             if coco_sec_prior_preds is not None:
                 coco_sec_prior_preds = coco_sec_prior_preds / count_mat
                 coco_sec_prior_preds = coco_sec_prior_preds.clamp_min(
@@ -16782,7 +16790,7 @@ class SegEarthOV3Segmentation(
                         aggregated_components[
                             'dual_head_fusion_class_logits'
                         ] = {
-                            name: self._aggregate_query_logits_to_classes(
+                            name: self._dhf_aggregate_query_logits_to_classes(
                                 query_logits)
                             for name, query_logits in value.items()
                         }

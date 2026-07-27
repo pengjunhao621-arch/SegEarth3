@@ -21,6 +21,13 @@ The official baseline remains unchanged. The bank is enabled only by
 `dump_dual_head_fusion_stats=True`, and its maps never replace the returned
 `seg_logits`.
 
+The diagnostic maps are copied to CPU float32 immediately after all formulas
+for a prompt are evaluated. Query-to-class reduction, thresholding, confusion
+matrices, and artifact generation remain on CPU. This is a storage-device-only
+change: it preserves every formula and the float32 evaluation protocol while
+preventing 18 full-resolution maps from remaining live on CUDA when SAM3
+decodes the next prompt. This is required for large VDD images.
+
 ## 2. Common notation
 
 - `S`: semantic-head probability map for one text prompt.

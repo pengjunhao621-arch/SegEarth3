@@ -69,6 +69,23 @@ def _logit(probability):
 
 def _check_formulas():
     diagnostic = _DummyDiagnostic()
+    diagnostic.num_cls = 2
+    diagnostic.num_queries = 3
+    diagnostic.query_idx = torch.tensor([0, 0, 1])
+    query_logits = torch.tensor([
+        [[0.1, 0.8], [0.2, 0.3]],
+        [[0.7, 0.4], [0.1, 0.9]],
+        [[0.5, 0.6], [0.8, 0.2]],
+    ])
+    reduced = diagnostic._dhf_aggregate_query_logits_to_classes(
+        query_logits)
+    torch.testing.assert_close(
+        reduced,
+        torch.stack([
+            torch.maximum(query_logits[0], query_logits[1]),
+            query_logits[2],
+        ]),
+    )
     semantic = torch.tensor(
         [[0.10, 0.70], [0.50, 0.20]], dtype=torch.float32)
     mask = torch.tensor(
@@ -113,6 +130,10 @@ def _check_formulas():
     assert stats['native_keep_count'] == 1
     assert stats['baseline_reconstruction_max_abs'] == 0.0
     assert set(variants) == set(VARIANT_NAMES)
+    assert all(
+        value.device.type == 'cpu'
+        and value.dtype == torch.float32
+        for value in variants.values())
 
     empty_variants, empty_stats = (
         diagnostic._dhf_build_prompt_variants(

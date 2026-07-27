@@ -157,6 +157,10 @@ def test_formula_bank_matches_predeclared_role_and_proc_graphs():
         variants['bi_i2s_only'], bi_i2s)
     torch.testing.assert_close(
         variants['bi_full'], bi_i2s)
+    assert all(
+        value.device.type == 'cpu'
+        and value.dtype == torch.float32
+        for value in variants.values())
     assert stats['native_keep_count'] == 1
     assert stats['baseline_reconstruction_max_abs'] == 0.0
 
@@ -200,6 +204,30 @@ def test_no_candidate_path_is_explicit_and_finite():
     assert all(
         torch.isfinite(value).all()
         for value in variants.values())
+    assert all(
+        value.device.type == 'cpu'
+        and value.dtype == torch.float32
+        for value in variants.values())
+
+
+def test_cpu_query_reduction_matches_grouped_prompt_max():
+    diagnostic = DummyDiagnostic()
+    diagnostic.num_cls = 2
+    diagnostic.num_queries = 3
+    diagnostic.query_idx = torch.tensor([0, 0, 1])
+    query_logits = torch.tensor([
+        [[0.1, 0.8], [0.2, 0.3]],
+        [[0.7, 0.4], [0.1, 0.9]],
+        [[0.5, 0.6], [0.8, 0.2]],
+    ])
+    reduced = diagnostic._dhf_aggregate_query_logits_to_classes(
+        query_logits)
+    expected = torch.stack([
+        torch.maximum(query_logits[0], query_logits[1]),
+        query_logits[2],
+    ])
+    torch.testing.assert_close(reduced, expected)
+    assert reduced.device.type == 'cpu'
 
 
 def _record(dataset, improved_variant='p1_role_once'):

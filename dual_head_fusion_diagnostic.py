@@ -72,6 +72,28 @@ class DualHeadFusionDiagnosticMixin:
                 'Dual-head fusion bank requires the unchanged SegEarth-OV3 '
                 'baseline contract: ' + '; '.join(errors))
 
+    def _dhf_aggregate_query_logits_to_classes(self, query_logits):
+        """Exact prompt max without a class-by-prompt broadcast tensor."""
+        if int(self.num_cls) == int(self.num_queries):
+            return query_logits
+        query_to_class = [
+            int(value) for value in self.query_idx.detach().cpu().tolist()
+        ]
+        class_maps = []
+        for class_index in range(int(self.num_cls)):
+            prompt_indices = [
+                index
+                for index, mapped_class in enumerate(query_to_class)
+                if mapped_class == class_index
+            ]
+            if not prompt_indices:
+                raise RuntimeError(
+                    'Dual-head fusion query mapping has no prompt for class '
+                    f'{class_index}.')
+            class_maps.append(
+                query_logits[prompt_indices].max(dim=0)[0])
+        return torch.stack(class_maps, dim=0)
+
     @staticmethod
     def _dhf_area(values, threshold):
         return _safe_div(
@@ -586,7 +608,17 @@ class DualHeadFusionDiagnosticMixin:
                     p0_reconstructed_native.float() - baseline
                 ).abs().mean().item()),
         )
-        return variants, stats
+        # These maps are diagnostic products, not inputs to another SAM3
+        # forward. Keeping them on CUDA until the next text prompt makes peak
+        # memory scale with ``num_variants * image_area`` and can prevent SAM3
+        # from upsampling the next prompt's masks on large VDD images.
+        # CPU float32 changes only storage device; formulas and thresholds are
+        # unchanged.
+        variants_cpu = {
+            name: values.detach().float().cpu()
+            for name, values in variants.items()
+        }
+        return variants_cpu, stats
 
     def _dhf_threshold_prediction(self, class_logits):
         prediction = class_logits.argmax(dim=0)
@@ -826,10 +858,16 @@ class DualHeadFusionDiagnosticMixin:
                     'Dual-head fusion baseline reconstruction failed: '
                     f'{integrity}')
 
+        # Formula-bank maps are deliberately offloaded after each prompt.
+        # Keep all diagnostic comparisons on that device instead of copying
+        # every full-resolution variant back to CUDA.
+        analysis_device = class_variants[VARIANT_NAMES[0]].device
         class_logits = {
-            'p0_baseline': base_class_logits.detach().float()}
+            'p0_baseline': base_class_logits.detach().float().to(
+                analysis_device)}
         for name in VARIANT_NAMES:
-            logits = class_variants[name].detach().float()
+            logits = class_variants[name].detach().float().to(
+                analysis_device)
             if int(logits.shape[0]) != int(self.num_cls):
                 raise RuntimeError(
                     f'Dual-head fusion variant {name!r} has '
@@ -837,7 +875,8 @@ class DualHeadFusionDiagnosticMixin:
                     f'{int(self.num_cls)}.')
             class_logits[name] = logits
         predictions = {
-            'p0_baseline': base_prediction.detach().long()}
+            'p0_baseline': base_prediction.detach().long().to(
+                analysis_device)}
         for name in VARIANT_NAMES:
             predictions[name] = self._dhf_threshold_prediction(
                 class_logits[name])
@@ -845,7 +884,7 @@ class DualHeadFusionDiagnosticMixin:
         gt = data_sample.gt_sem_seg.data
         if gt.ndim == 3:
             gt = gt.squeeze(0)
-        gt = gt.to(base_prediction.device).long()
+        gt = gt.to(analysis_device).long()
         valid = gt != 255
         valid_pixels = int(valid.sum().item())
 
@@ -880,7 +919,8 @@ class DualHeadFusionDiagnosticMixin:
             ))
             contrast_stats.append(row)
 
-        class_presence = class_presence.detach().float().clamp(0.0, 1.0)
+        class_presence = class_presence.detach().float().to(
+            analysis_device).clamp(0.0, 1.0)
         class_object_score = torch.zeros_like(class_presence)
         for prompt_row in prompt_stats:
             class_index = int(prompt_row.get('class_index', -1))
@@ -893,8 +933,8 @@ class DualHeadFusionDiagnosticMixin:
                     class_object_score.new_tensor(float(value)),
                 )
         high_agreement_stats = self._dhf_high_agreement_stats(
-            base_class_logits.detach().float(),
-            base_prediction,
+            class_logits['p0_baseline'],
+            predictions['p0_baseline'],
             gt,
             valid,
             class_logits,
@@ -951,6 +991,7 @@ class DualHeadFusionDiagnosticMixin:
                 same_decoder_output_per_prompt=True,
                 extra_sam3_forward_calls=0,
                 ground_truth_used_in_fusion=False,
+                diagnostic_storage='cpu_float32',
                 candidate_policy='native_keep_presence_times_object_score',
                 class_prompt_reduction='max',
             ),
