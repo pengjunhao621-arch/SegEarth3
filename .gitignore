@@ -67,6 +67,8 @@ seg_pred.png
 
 # Local papers, research notes, and presentation/office documents
 /paper/
+/参考论文/
+/tmp/
 /docs/
 /state.md
 /dataset_prepare.md
