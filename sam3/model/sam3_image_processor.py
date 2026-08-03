@@ -462,6 +462,7 @@ class Sam3Processor:
             "encoder_vis_feat_sizes",
             "encoder_spatial_shapes",
             "encoder_level_start_index",
+            "semantic_mask_raw_logits",
         ]
         for key in keys_to_del:
             if key in state:
@@ -520,12 +521,13 @@ class Sam3Processor:
             align_corners=False,
         ).sigmoid()
 
-        out_semantic_masks = interpolate(
+        out_semantic_raw = interpolate(
             outputs["semantic_seg"],
             (img_h, img_w),
             mode="bilinear",
             align_corners=False,
-        ).sigmoid()
+        )
+        out_semantic_masks = out_semantic_raw.sigmoid()
 
         state["masks_logits"] = out_masks
         state["masks"] = out_masks > 0.5
@@ -536,6 +538,10 @@ class Sam3Processor:
         state["raw_object_score_presence"] = raw_object_score_presence
         state["raw_keep_mask"] = keep
         state["semantic_mask_logits"] = out_semantic_masks # for SS
+        # Preserve the pre-sigmoid dense semantic evidence for calibrated
+        # uncertainty diagnostics and test-time prompt adaptation.  This does
+        # not alter any official prediction or filtering behavior.
+        state["semantic_mask_raw_logits"] = out_semantic_raw
         state["presence_score"] = presence_score.squeeze().squeeze()
         state["object_score_raw"] = object_score_raw
         state["object_score_presence"] = object_score_presence

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "dataset": "VDD",
+  "generator": "Codex, manually constrained from dataset labels and overhead-image semantics",
+  "classes": [
+    {"id": 0, "name": "background", "descriptions": ["background", "background regions outside the annotated urban surface classes", "miscellaneous background clutter in a low altitude drone image", "unlabelled background surfaces between foreground objects", "background areas not belonging to facade road vegetation vehicle roof or water"]},
+    {"id": 1, "name": "facade", "descriptions": ["facade", "visible building facade surfaces in an oblique drone image", "vertical facade regions along the sides of urban buildings", "facade walls with regular man-made boundaries", "building facade appearance distinct from the upper roof"]},
+    {"id": 2, "name": "road", "descriptions": ["road", "road surfaces forming connected urban corridors", "asphalt road with linear boundaries in a drone image", "road regions between buildings vegetation and vehicles", "wide and narrow road segments seen from above"]},
+    {"id": 3, "name": "vegetation", "descriptions": ["vegetation", "vegetation with tree canopies shrubs and planted green areas", "irregular textured vegetation regions in an urban drone image", "dense or sparse vegetation beside roads and buildings", "overhead vegetation forming natural green patches"]},
+    {"id": 4, "name": "vehicle", "descriptions": ["vehicle", "small vehicle objects on roads and parking areas", "vehicle roofs with compact rectangular shapes in a drone image", "parked or moving vehicle instances seen from above", "vehicle objects surrounded by road surfaces"]},
+    {"id": 5, "name": "roof", "descriptions": ["roof", "building roof surfaces visible from above", "roof regions with regular polygonal footprints and man-made texture", "flat or sloped roof areas above building facades", "urban roof structures surrounded by roads and vegetation"]},
+    {"id": 6, "name": "water", "descriptions": ["water", "water surfaces with smooth texture in a drone image", "dark or reflective water regions bounded by land", "river pond or channel water seen from above", "continuous water areas with irregular natural boundaries"]}
+  ]
+}

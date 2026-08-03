@@ -38,12 +38,17 @@ from self_prompted_concept_verification import (
 )
 from evidence_enhancement import EvidenceEnhancementMixin
 from structure_aware_recalibration import StructureAwareRecalibrationMixin
+from role_prompt_tta import (
+    RolePromptTTAMixin,
+    VARIANT_NAMES as ROLE_PROMPT_TTA_VARIANTS,
+)
 from sam3 import build_sam3_image_model
 from sam3.model.sam3_image_processor import Sam3Processor
 
 
 @MODELS.register_module()
 class SegEarthOV3Segmentation(
+        RolePromptTTAMixin,
         CrossImageBankDiagnosticMixin,
         OntologySelfVerificationMixin,
         OntologyReadoutOracleMixin,
@@ -691,6 +696,37 @@ class SegEarthOV3Segmentation(
                  cross_image_bank_apply_protect_bg=True,
                  cross_image_bank_apply_exclude_bg_candidate=True,
                  cross_image_bank_apply_require_base_non_bg=True,
+                 use_role_prompt_tta=False,
+                 dump_role_prompt_tta_stats=False,
+                 role_prompt_tta_dataset_name=None,
+                 role_prompt_tta_prompt_bank=None,
+                 role_prompt_tta_stats_path=None,
+                 role_prompt_tta_artifact_dir=None,
+                 role_prompt_tta_remoteclip_checkpoint='weights/remoteclip/RemoteCLIP-ViT-L-14.pt',
+                 role_prompt_tta_remoteclip_source_root='SCORE-main',
+                 role_prompt_tta_remoteclip_model='ViT-L-14',
+                 role_prompt_tta_primary_variant='full_regrounded_e2e',
+                 role_prompt_tta_anchor_mass=0.50,
+                 role_prompt_tta_visual_strength=1.0,
+                 role_prompt_tta_presence_threshold=0.05,
+                 role_prompt_tta_seed_fraction=0.20,
+                 role_prompt_tta_min_seed_pixels=2,
+                 role_prompt_tta_temperature=1.0,
+                 role_prompt_tta_steps=3,
+                 role_prompt_tta_lr=0.05,
+                 role_prompt_tta_anchor_lambda=0.05,
+                 role_prompt_tta_delta_max=1.0,
+                 role_prompt_tta_class_balanced_entropy=True,
+                 role_prompt_tta_e2e_steps=1,
+                 role_prompt_tta_e2e_lr=0.02,
+                 role_prompt_tta_e2e_max_classes=4,
+                 role_prompt_tta_adapt_background=False,
+                 role_prompt_tta_eps=1e-6,
+                 role_prompt_tta_strict_integrity=True,
+                 role_prompt_tta_integrity_tolerance=1e-5,
+                 role_prompt_tta_save_npz=True,
+                 role_prompt_tta_artifact_max_side=128,
+                 role_prompt_tta_max_saved_images=8,
                  **kwargs):
         super().__init__()
 
@@ -1657,6 +1693,49 @@ class SegEarthOV3Segmentation(
         self._coco_sec_stats_file = None
         self._coco_sec_query_text_features = None
         self.class_names = _build_class_names(self.query_words, self.query_idx, self.num_cls)
+        self._rpt_initialize(
+            use_role_prompt_tta=use_role_prompt_tta,
+            dump_role_prompt_tta_stats=dump_role_prompt_tta_stats,
+            role_prompt_tta_dataset_name=role_prompt_tta_dataset_name,
+            role_prompt_tta_prompt_bank=role_prompt_tta_prompt_bank,
+            role_prompt_tta_stats_path=role_prompt_tta_stats_path,
+            role_prompt_tta_artifact_dir=role_prompt_tta_artifact_dir,
+            role_prompt_tta_remoteclip_checkpoint=(
+                role_prompt_tta_remoteclip_checkpoint),
+            role_prompt_tta_remoteclip_source_root=(
+                role_prompt_tta_remoteclip_source_root),
+            role_prompt_tta_remoteclip_model=role_prompt_tta_remoteclip_model,
+            role_prompt_tta_primary_variant=role_prompt_tta_primary_variant,
+            role_prompt_tta_anchor_mass=role_prompt_tta_anchor_mass,
+            role_prompt_tta_visual_strength=role_prompt_tta_visual_strength,
+            role_prompt_tta_presence_threshold=(
+                role_prompt_tta_presence_threshold),
+            role_prompt_tta_seed_fraction=role_prompt_tta_seed_fraction,
+            role_prompt_tta_min_seed_pixels=role_prompt_tta_min_seed_pixels,
+            role_prompt_tta_temperature=role_prompt_tta_temperature,
+            role_prompt_tta_steps=role_prompt_tta_steps,
+            role_prompt_tta_lr=role_prompt_tta_lr,
+            role_prompt_tta_anchor_lambda=role_prompt_tta_anchor_lambda,
+            role_prompt_tta_delta_max=role_prompt_tta_delta_max,
+            role_prompt_tta_class_balanced_entropy=(
+                role_prompt_tta_class_balanced_entropy),
+            role_prompt_tta_e2e_steps=role_prompt_tta_e2e_steps,
+            role_prompt_tta_e2e_lr=role_prompt_tta_e2e_lr,
+            role_prompt_tta_e2e_max_classes=(
+                role_prompt_tta_e2e_max_classes),
+            role_prompt_tta_adapt_background=(
+                role_prompt_tta_adapt_background),
+            role_prompt_tta_eps=role_prompt_tta_eps,
+            role_prompt_tta_strict_integrity=(
+                role_prompt_tta_strict_integrity),
+            role_prompt_tta_integrity_tolerance=(
+                role_prompt_tta_integrity_tolerance),
+            role_prompt_tta_save_npz=role_prompt_tta_save_npz,
+            role_prompt_tta_artifact_max_side=(
+                role_prompt_tta_artifact_max_side),
+            role_prompt_tta_max_saved_images=(
+                role_prompt_tta_max_saved_images),
+        )
         if self.instance_score_type not in ('presence', 'raw'):
             raise ValueError(
                 "instance_score_type must be 'presence' or 'raw', "
@@ -2062,8 +2141,28 @@ class SegEarthOV3Segmentation(
             raw_kept_count=int(keep_mask.detach().bool().sum().item()),
         )
 
-    def _inference_single_view(self, image, return_stats=False, return_components=False,
-                               view_id=None, crop_box=None):
+    def _inference_single_view(self, image, return_stats=False,
+                               return_components=False, view_id=None,
+                               crop_box=None):
+        if self._uses_role_prompt_tta():
+            return self._rpt_infer_single_view(
+                image,
+                return_stats=return_stats,
+                return_components=return_components,
+                view_id=view_id,
+                crop_box=crop_box,
+            )
+        return self._inference_single_view_native(
+            image,
+            return_stats=return_stats,
+            return_components=return_components,
+            view_id=view_id,
+            crop_box=crop_box,
+        )
+
+    def _inference_single_view_native(
+            self, image, return_stats=False, return_components=False,
+            view_id=None, crop_box=None):
         """Inference on a single PIL image or crop patch."""
         w, h = image.size
         seg_logits = torch.zeros((self.num_queries, h, w), device=self.device)
@@ -2491,6 +2590,19 @@ class SegEarthOV3Segmentation(
             []
             if dual_head_fusion_preds is not None
             else None)
+        role_prompt_tta_preds = (
+            {
+                name: torch.zeros(
+                    (self.num_queries, h_img, w_img),
+                    device='cpu',
+                    dtype=torch.float32,
+                )
+                for name in ROLE_PROMPT_TTA_VARIANTS
+            }
+            if return_components and self._uses_role_prompt_tta()
+            else None)
+        role_prompt_view_stats = (
+            [] if role_prompt_tta_preds is not None else None)
         coco_sec_prior_preds = (
             torch.zeros((self.num_cls, h_img, w_img), device=self.device)
             if return_components
@@ -2613,6 +2725,20 @@ class SegEarthOV3Segmentation(
                         dual_head_fusion_prompt_stats.extend(
                             crop_components.get(
                                 'dual_head_fusion_prompt_stats', []))
+                    if role_prompt_tta_preds is not None:
+                        crop_variants = crop_components.get(
+                            'role_prompt_variant_query_logits')
+                        if not isinstance(crop_variants, dict):
+                            raise RuntimeError(
+                                'Sliding role-prompt TTA is missing crop '
+                                'variant logits.')
+                        for variant_name in ROLE_PROMPT_TTA_VARIANTS:
+                            role_prompt_tta_preds[
+                                variant_name][:, y1:y2, x1:x2] += (
+                                    crop_variants[variant_name].detach()
+                                    .float().cpu())
+                        role_prompt_view_stats.extend(
+                            crop_components.get('role_prompt_view_stats', []))
                     if raw_mask_candidates is not None:
                         raw_mask_candidates.extend(
                             crop_components.get(
@@ -2685,6 +2811,12 @@ class SegEarthOV3Segmentation(
                     dual_head_fusion_preds[variant_name] = (
                         dual_head_fusion_preds[variant_name]
                         / dual_head_count_mat)
+            if role_prompt_tta_preds is not None:
+                role_prompt_count_mat = count_mat.detach().float().cpu()
+                for variant_name in ROLE_PROMPT_TTA_VARIANTS:
+                    role_prompt_tta_preds[variant_name] = (
+                        role_prompt_tta_preds[variant_name]
+                        / role_prompt_count_mat)
             if coco_sec_prior_preds is not None:
                 coco_sec_prior_preds = coco_sec_prior_preds / count_mat
                 coco_sec_prior_preds = coco_sec_prior_preds.clamp_min(
@@ -2723,6 +2855,10 @@ class SegEarthOV3Segmentation(
                 dual_head_fusion_preds)
             components['dual_head_fusion_prompt_stats'] = (
                 dual_head_fusion_prompt_stats)
+        if return_components and role_prompt_tta_preds is not None:
+            components['role_prompt_variant_query_logits'] = (
+                role_prompt_tta_preds)
+            components['role_prompt_view_stats'] = role_prompt_view_stats
         if (
                 return_components
                 and presence_query_sum is not None
@@ -16697,6 +16833,7 @@ class SegEarthOV3Segmentation(
                 or self._uses_candidate_region_quality_diagnostic()
                 or self._uses_presence_allocation_diagnostic()
                 or self._uses_dual_head_fusion_diagnostic()
+                or self._uses_role_prompt_tta()
                 or self._uses_query_topology_diagnostic()
                 or self._uses_rethinking_reviewer()
                 or self._uses_ontology_self_verification()
@@ -16771,6 +16908,17 @@ class SegEarthOV3Segmentation(
                                 mode='bilinear',
                                 align_corners=False,
                             ).squeeze(0)
+                    role_variants = components.get(
+                        'role_prompt_variant_query_logits')
+                    if isinstance(role_variants, dict):
+                        for variant_name, variant_logits in list(
+                                role_variants.items()):
+                            role_variants[variant_name] = F.interpolate(
+                                variant_logits.unsqueeze(0),
+                                size=ori_shape,
+                                mode='bilinear',
+                                align_corners=False,
+                            ).squeeze(0)
 
             # Post-processing
             query_seg_logits = seg_logits
@@ -16791,6 +16939,14 @@ class SegEarthOV3Segmentation(
                             'dual_head_fusion_class_logits'
                         ] = {
                             name: self._dhf_aggregate_query_logits_to_classes(
+                                query_logits)
+                            for name, query_logits in value.items()
+                        }
+                    elif key == 'role_prompt_variant_query_logits':
+                        aggregated_components[
+                            'role_prompt_variant_class_logits'
+                        ] = {
+                            name: self._rpt_aggregate_query_logits_to_classes(
                                 query_logits)
                             for name, query_logits in value.items()
                         }
@@ -16816,6 +16972,18 @@ class SegEarthOV3Segmentation(
                     seg_logits = coco_sec_logits
 
             base_seg_pred = self._threshold_with_reject_recovery(base_seg_logits, components)
+            if self._uses_role_prompt_tta():
+                role_variants = components.get(
+                    'role_prompt_variant_class_logits', {})
+                if not role_variants:
+                    raise RuntimeError(
+                        'Role-prompt TTA did not return class variant logits.')
+                self._rpt_record_image(
+                    role_variants,
+                    components.get('role_prompt_view_stats', []),
+                    data_samples[i] if data_samples is not None else None,
+                    image_path,
+                )
             presence_allocation_context = None
             if self._uses_presence_allocation_diagnostic():
                 presence_allocation_context = (

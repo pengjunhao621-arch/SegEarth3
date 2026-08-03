@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "dataset": "Potsdam",
+  "generator": "Codex, manually constrained from ISPRS labels and very-high-resolution aerial semantics",
+  "classes": [
+    {"id": 0, "name": "road", "descriptions": ["road", "road and impervious ground forming connected paved surfaces", "broad paved road corridors and open impervious areas in an aerial image", "road surfaces between dense buildings trees and cars", "grey road regions with straight or curved man-made boundaries"]},
+    {"id": 1, "name": "building", "descriptions": ["building", "building rooftops with regular polygonal footprints", "dense urban building roofs in very high resolution aerial imagery", "building structures with sharp edges varied roof colors and shadows", "small and large building regions surrounded by paved surfaces"]},
+    {"id": 2, "name": "grass", "descriptions": ["grass", "grass and low vegetation forming smooth green areas", "managed grass surfaces without tall tree canopies", "grass regions in gardens sports grounds and open land", "low textured grass patches beside buildings roads and trees"]},
+    {"id": 3, "name": "tree", "descriptions": ["tree", "tree canopies forming irregular textured crowns", "tall tree vegetation with dense crowns and local shadows", "individual and clustered tree crowns viewed from above", "tree regions with rough texture distinct from smooth grass"]},
+    {"id": 4, "name": "car", "descriptions": ["car", "small car roofs located on roads and parking surfaces", "compact rectangular car instances in very high resolution imagery", "parked car objects with sharp boundaries and short shadows", "car targets much smaller than nearby buildings and roads"]},
+    {"id": 5, "name": "clutter", "descriptions": ["clutter", "clutter regions outside the five primary land cover classes", "miscellaneous clutter and unlabelled objects in an aerial image", "clutter areas not belonging to road building grass tree or car", "rare background clutter with mixed colors and structures"]}
+  ]
+}

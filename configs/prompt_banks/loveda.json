@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "dataset": "LoveDA",
+  "generator": "Codex, manually constrained from LoveDA labels and urban-rural aerial semantics",
+  "classes": [
+    {"id": 0, "name": "background", "descriptions": ["background", "background regions outside the six foreground land cover classes", "miscellaneous background and unlabelled surfaces in an aerial image", "background clutter across urban and rural scenes", "background areas not belonging to building road water barren forest or agricultural"]},
+    {"id": 1, "name": "building", "descriptions": ["building", "building and house rooftops with regular man-made footprints", "dense or isolated building structures in urban and rural scenes", "building regions surrounded by roads forest or agricultural land", "small and large building roofs viewed from above"]},
+    {"id": 2, "name": "road", "descriptions": ["road", "road surfaces forming connected linear transport corridors", "wide and narrow road segments between buildings and land cover regions", "paved or unpaved road areas viewed from above", "continuous road geometry across urban and rural aerial scenes"]},
+    {"id": 3, "name": "water", "descriptions": ["water", "water surfaces with smooth dark or reflective appearance", "river lake pond or canal water bounded by land", "continuous water regions with irregular natural boundaries", "blue green or dark water areas viewed from above"]},
+    {"id": 4, "name": "barren", "descriptions": ["barren", "barren and bareland surfaces with exposed soil or sand", "dry barren regions with little vegetation and irregular boundaries", "barren ground in construction fields or natural open land", "earth colored barren areas distinct from roads and agriculture"]},
+    {"id": 5, "name": "forest", "descriptions": ["forest", "forest and tree canopy regions with dense rough texture", "continuous forest cover or clustered tree crowns viewed from above", "forest areas with tall vegetation shadows and irregular boundaries", "urban or rural forest distinct from low agricultural vegetation"]},
+    {"id": 6, "name": "agricultural", "descriptions": ["agricultural", "agricultural land arranged in fields plots or cultivated parcels", "active or fallow agricultural regions with crop texture", "large agricultural areas separated by roads forest or boundaries", "rural agricultural land with regular or irregular field patterns"]}
+  ]
+}

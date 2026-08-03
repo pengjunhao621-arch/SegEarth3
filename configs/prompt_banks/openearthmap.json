@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "dataset": "OpenEarthMap",
+  "generator": "Codex, manually constrained from OpenEarthMap labels and cross-region aerial semantics",
+  "classes": [
+    {"id": 0, "name": "background", "descriptions": ["background", "background regions outside the annotated land cover categories", "miscellaneous background and unlabelled surfaces in an aerial image", "background areas not assigned to a foreground land cover class", "mixed background clutter across urban and rural overhead scenes"]},
+    {"id": 1, "name": "bareland", "descriptions": ["bareland", "bareland with exposed soil sand or sparsely covered ground", "dry bareland regions without buildings crops trees or water", "irregular bareland patches with earthy color and weak vegetation", "bareland surfaces in construction natural or agricultural surroundings"]},
+    {"id": 2, "name": "grass", "descriptions": ["grass", "grass and low vegetation forming continuous green ground cover", "managed or natural grass regions without dense tree canopies", "grass areas in fields lawns verges and open urban land", "smooth low textured grass patches viewed from above"]},
+    {"id": 3, "name": "pavement", "descriptions": ["pavement", "pavement forming compact man-made impervious surfaces", "pavement in parking lots courtyards sidewalks and plazas", "grey pavement regions near buildings and roads", "pavement areas with regular hard-surface boundaries"]},
+    {"id": 4, "name": "road", "descriptions": ["road", "road surfaces forming elongated connected transport corridors", "wide and narrow road segments across urban and rural scenes", "paved or unpaved road regions with continuous linear geometry", "road areas connecting buildings fields and settlements"]},
+    {"id": 5, "name": "tree", "descriptions": ["tree", "tree and forest canopies with irregular dense texture", "individual or clustered tree crowns seen from above", "tree regions with tall vegetation shadows and rough canopy structure", "continuous tree cover distinct from low grass and cropland"]},
+    {"id": 6, "name": "water", "descriptions": ["water", "water and river surfaces with smooth or reflective appearance", "continuous water regions bounded by land or vegetation", "water in rivers lakes ponds canals and coastal areas", "dark blue green or reflective water viewed from above"]},
+    {"id": 7, "name": "cropland", "descriptions": ["cropland", "cropland arranged in cultivated fields and agricultural parcels", "cropland with rows plots or homogeneous crop texture", "large cropland regions separated by roads boundaries or vegetation", "active or fallow cropland viewed in an overhead image"]},
+    {"id": 8, "name": "building", "descriptions": ["building", "building roof and house footprints with regular man-made boundaries", "small and large building structures in urban and rural settlements", "building rooftops surrounded by roads pavement trees or fields", "dense or isolated building regions viewed from above"]}
+  ]
+}
