@@ -5,7 +5,10 @@ MODE="${1:-smoke}"
 ROOT="${ROOT:-logs/head_role_prompt_conflict_v1}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 GPU_LIST="${GPU_LIST:-0,1}"
-NPROC="${NPROC:-2}"
+# One rank is the safe smoke default: a one-sample subset can be padded and
+# duplicated by a multi-rank distributed sampler. Full runs should explicitly
+# set NPROC=2 (or more when host RAM permits).
+NPROC="${NPROC:-1}"
 DATASETS="${DATASETS:-udd5 vdd vaihingen potsdam openearthmap loveda}"
 SMOKE_SAMPLES="${SMOKE_SAMPLES:-1}"
 SAVE_NPZ="${SAVE_NPZ:-True}"
