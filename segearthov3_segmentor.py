@@ -38,10 +38,7 @@ from self_prompted_concept_verification import (
 )
 from evidence_enhancement import EvidenceEnhancementMixin
 from structure_aware_recalibration import StructureAwareRecalibrationMixin
-from role_prompt_tta import (
-    RolePromptTTAMixin,
-    VARIANT_NAMES as ROLE_PROMPT_TTA_VARIANTS,
-)
+from role_prompt_tta import RolePromptTTAMixin
 from sam3 import build_sam3_image_model
 from sam3.model.sam3_image_processor import Sam3Processor
 
@@ -698,6 +695,7 @@ class SegEarthOV3Segmentation(
                  cross_image_bank_apply_require_base_non_bg=True,
                  use_role_prompt_tta=False,
                  dump_role_prompt_tta_stats=False,
+                 role_prompt_tta_protocol='v1',
                  role_prompt_tta_dataset_name=None,
                  role_prompt_tta_prompt_bank=None,
                  role_prompt_tta_stats_path=None,
@@ -721,6 +719,7 @@ class SegEarthOV3Segmentation(
                  role_prompt_tta_e2e_steps=1,
                  role_prompt_tta_e2e_lr=0.02,
                  role_prompt_tta_e2e_max_classes=4,
+                 role_prompt_tta_e2e_measure_post=False,
                  role_prompt_tta_adapt_background=False,
                  role_prompt_tta_eps=1e-6,
                  role_prompt_tta_strict_integrity=True,
@@ -1697,6 +1696,7 @@ class SegEarthOV3Segmentation(
         self._rpt_initialize(
             use_role_prompt_tta=use_role_prompt_tta,
             dump_role_prompt_tta_stats=dump_role_prompt_tta_stats,
+            role_prompt_tta_protocol=role_prompt_tta_protocol,
             role_prompt_tta_dataset_name=role_prompt_tta_dataset_name,
             role_prompt_tta_prompt_bank=role_prompt_tta_prompt_bank,
             role_prompt_tta_stats_path=role_prompt_tta_stats_path,
@@ -1726,6 +1726,8 @@ class SegEarthOV3Segmentation(
             role_prompt_tta_e2e_lr=role_prompt_tta_e2e_lr,
             role_prompt_tta_e2e_max_classes=(
                 role_prompt_tta_e2e_max_classes),
+            role_prompt_tta_e2e_measure_post=(
+                role_prompt_tta_e2e_measure_post),
             role_prompt_tta_adapt_background=(
                 role_prompt_tta_adapt_background),
             role_prompt_tta_eps=role_prompt_tta_eps,
@@ -2600,7 +2602,7 @@ class SegEarthOV3Segmentation(
                     device='cpu',
                     dtype=torch.float32,
                 )
-                for name in ROLE_PROMPT_TTA_VARIANTS
+                for name in self._rpt_variant_names()
             }
             if return_components and self._uses_role_prompt_tta()
             else None)
@@ -2735,7 +2737,7 @@ class SegEarthOV3Segmentation(
                             raise RuntimeError(
                                 'Sliding role-prompt TTA is missing crop '
                                 'variant logits.')
-                        for variant_name in ROLE_PROMPT_TTA_VARIANTS:
+                        for variant_name in self._rpt_variant_names():
                             role_prompt_tta_preds[
                                 variant_name][:, y1:y2, x1:x2] += (
                                     crop_variants[variant_name].detach()
@@ -2816,7 +2818,7 @@ class SegEarthOV3Segmentation(
                         / dual_head_count_mat)
             if role_prompt_tta_preds is not None:
                 role_prompt_count_mat = count_mat.detach().float().cpu()
-                for variant_name in ROLE_PROMPT_TTA_VARIANTS:
+                for variant_name in self._rpt_variant_names():
                     role_prompt_tta_preds[variant_name] = (
                         role_prompt_tta_preds[variant_name]
                         / role_prompt_count_mat)

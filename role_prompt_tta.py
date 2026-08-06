@@ -23,7 +23,19 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from role_prompt_tta_definitions import SCHEMA_VERSION, VARIANT_NAMES
+from role_prompt_tta_definitions import (
+    SCHEMA_VERSION,
+    VARIANT_NAMES as V1_VARIANT_NAMES,
+)
+from prompt_functional_atlas_definitions import (
+    PROMPT_COUNT as ATLAS_PROMPT_COUNT,
+    PROMPT_SLOTS as ATLAS_PROMPT_SLOTS,
+    SCHEMA_VERSION as ATLAS_SCHEMA_VERSION,
+    VARIANT_NAMES as ATLAS_VARIANT_NAMES,
+)
+
+# Backward-compatible export used by existing configs/tests/summarization.
+VARIANT_NAMES = V1_VARIANT_NAMES
 
 def _safe_div(numerator, denominator):
     return float(numerator) / float(denominator) if denominator else 0.0
@@ -393,6 +405,7 @@ class RolePromptTTAMixin:
     def _rpt_initialize(
             self, use_role_prompt_tta=False,
             dump_role_prompt_tta_stats=False,
+            role_prompt_tta_protocol='v1',
             role_prompt_tta_dataset_name=None,
             role_prompt_tta_prompt_bank=None,
             role_prompt_tta_stats_path=None,
@@ -417,6 +430,7 @@ class RolePromptTTAMixin:
             role_prompt_tta_e2e_steps=1,
             role_prompt_tta_e2e_lr=0.02,
             role_prompt_tta_e2e_max_classes=4,
+            role_prompt_tta_e2e_measure_post=False,
             role_prompt_tta_adapt_background=False,
             role_prompt_tta_eps=1e-6,
             role_prompt_tta_strict_integrity=True,
@@ -426,6 +440,7 @@ class RolePromptTTAMixin:
             role_prompt_tta_max_saved_images=8):
         self.use_role_prompt_tta = bool(use_role_prompt_tta)
         self.dump_role_prompt_tta_stats = bool(dump_role_prompt_tta_stats)
+        self.role_prompt_tta_protocol = str(role_prompt_tta_protocol)
         self.role_prompt_tta_dataset_name = role_prompt_tta_dataset_name
         self.role_prompt_tta_prompt_bank = role_prompt_tta_prompt_bank
         self.role_prompt_tta_stats_path = role_prompt_tta_stats_path
@@ -458,6 +473,8 @@ class RolePromptTTAMixin:
         self.role_prompt_tta_e2e_lr = float(role_prompt_tta_e2e_lr)
         self.role_prompt_tta_e2e_max_classes = int(
             role_prompt_tta_e2e_max_classes)
+        self.role_prompt_tta_e2e_measure_post = bool(
+            role_prompt_tta_e2e_measure_post)
         self.role_prompt_tta_adapt_background = bool(
             role_prompt_tta_adapt_background)
         self.role_prompt_tta_eps = float(role_prompt_tta_eps)
@@ -477,7 +494,12 @@ class RolePromptTTAMixin:
         self._rpt_native_parity_checked = False
         self._rpt_native_parity_max_abs = None
 
-        if self.role_prompt_tta_primary_variant not in VARIANT_NAMES:
+        if self.role_prompt_tta_protocol not in (
+                'v1', 'prompt_functional_atlas_v2'):
+            raise ValueError(
+                f'Unknown role_prompt_tta_protocol='
+                f'{self.role_prompt_tta_protocol!r}.')
+        if self.role_prompt_tta_primary_variant not in self._rpt_variant_names():
             raise ValueError(
                 f'Unknown role_prompt_tta_primary_variant='
                 f'{self.role_prompt_tta_primary_variant!r}.')
@@ -486,6 +508,14 @@ class RolePromptTTAMixin:
                 raise ValueError('role_prompt_tta_prompt_bank is required.')
             self._rpt_prompt_bank = load_prompt_bank(
                 role_prompt_tta_prompt_bank, self.class_names)
+            if (
+                    self.role_prompt_tta_protocol
+                    == 'prompt_functional_atlas_v2'
+                    and int(self._rpt_prompt_bank['_prompt_count'])
+                    != ATLAS_PROMPT_COUNT):
+                raise ValueError(
+                    'Prompt functional atlas v2 requires exactly '
+                    f'{ATLAS_PROMPT_COUNT} role-controlled prompts per class.')
             descriptions = [
                 description
                 for item in self._rpt_prompt_bank['classes']
@@ -513,6 +543,18 @@ class RolePromptTTAMixin:
         return bool(
             getattr(self, 'use_role_prompt_tta', False)
             or getattr(self, 'dump_role_prompt_tta_stats', False))
+
+    def _rpt_variant_names(self):
+        if getattr(self, 'role_prompt_tta_protocol', 'v1') \
+                == 'prompt_functional_atlas_v2':
+            return ATLAS_VARIANT_NAMES
+        return V1_VARIANT_NAMES
+
+    def _rpt_record_schema_version(self):
+        if getattr(self, 'role_prompt_tta_protocol', 'v1') \
+                == 'prompt_functional_atlas_v2':
+            return ATLAS_SCHEMA_VERSION
+        return SCHEMA_VERSION
 
     def _rpt_autocast_context(self):
         return (
@@ -665,17 +707,30 @@ class RolePromptTTAMixin:
                 torch.stack([row[key] for row in class_rows], dim=0)
                 for class_rows in bank_rows
             ], dim=0)
-            for key in ('final', 'semantic_raw', 'instance')
+            for key in ('final', 'semantic_raw', 'instance', 'presence')
         }
-        candidate_stats = [[dict(
-            prompt=row['prompt'],
-            presence=float(row['presence'].item()),
-            raw_candidate_count=int(row['raw_candidate_count']),
-            kept_candidate_count=int(row['kept_candidate_count']),
-            semantic_mean=float(row['semantic'].mean().item()),
-            instance_mean=float(row['instance'].mean().item()),
-            final_mean=float(row['final'].mean().item()),
-        ) for row in class_rows] for class_rows in bank_rows]
+        candidate_stats = []
+        for class_rows in bank_rows:
+            rows = []
+            for row in class_rows:
+                prompt = row['prompt']
+                prompt_index = int(cache['index'][prompt])
+                token_count = int((
+                    ~cache['language_mask'][prompt_index].bool()
+                ).sum().item())
+                rows.append(dict(
+                    prompt=prompt,
+                    token_count=token_count,
+                    word_count=len(prompt.split()),
+                    character_count=len(prompt),
+                    presence=float(row['presence'].item()),
+                    raw_candidate_count=int(row['raw_candidate_count']),
+                    kept_candidate_count=int(row['kept_candidate_count']),
+                    semantic_mean=float(row['semantic'].mean().item()),
+                    instance_mean=float(row['instance'].mean().item()),
+                    final_mean=float(row['final'].mean().item()),
+                ))
+            candidate_stats.append(rows)
         return state, cache, baseline, bank, candidate_stats
 
     def _rpt_query_to_class(self, query_maps):
@@ -821,6 +876,93 @@ class RolePromptTTAMixin:
         }
         return outputs, fusion_stats
 
+    def _rpt_reground_anchor_residual(
+            self, state, cache, target_weights, output_shape, alpha):
+        """Re-ground a bounded residual while preserving the anchor mask.
+
+        This is an intentionally conservative diagnostic.  Only token
+        positions valid in the literal class-name sequence are modified; the
+        literal sequence length/mask remains unchanged.  It tests whether the
+        failure is caused by the magnitude of language movement or by any
+        position-wise contextual-sequence interpolation at all.
+        """
+        alpha = float(alpha)
+        if not (0.0 <= alpha <= 1.0):
+            raise ValueError('anchor residual alpha must be in [0, 1].')
+        features, masks = self._rpt_bank_language_tensors(cache)
+        rows = []
+        fusion_stats = []
+        with torch.no_grad(), self._rpt_autocast_context():
+            for class_idx in range(int(target_weights.shape[0])):
+                target, target_mask = mask_aware_language_fusion(
+                    features[class_idx], masks[class_idx],
+                    target_weights[class_idx], self.role_prompt_tta_eps)
+                anchor = features[class_idx, 0]
+                anchor_mask = masks[class_idx, 0].bool()
+                overlap = (~anchor_mask) & (~target_mask.bool())
+                fused = anchor.clone()
+                fused[overlap] = (
+                    anchor[overlap]
+                    + alpha * (target[overlap] - anchor[overlap]))
+                fused_mask = anchor_mask.clone()
+                self.processor.reset_all_prompts(state)
+                state['backbone_out']['language_features'] = fused[:, None]
+                state['backbone_out']['language_mask'] = fused_mask[None]
+                state['geometric_prompt'] = self.processor.model._get_dummy_prompt()
+                self.processor._forward_grounding(state)
+                rows.append(self._rpt_prompt_components(state, output_shape))
+                valid = ~anchor_mask
+                anchor_norm = anchor[valid].float().norm().clamp_min(
+                    self.role_prompt_tta_eps)
+                residual = fused[valid].float() - anchor[valid].float()
+                fusion_stats.append(dict(
+                    class_index=int(class_idx),
+                    alpha=alpha,
+                    valid_tokens=int(valid.sum().item()),
+                    overlap_tokens=int(overlap.sum().item()),
+                    raw_candidate_count=int(rows[-1]['raw_candidate_count']),
+                    kept_candidate_count=int(rows[-1]['kept_candidate_count']),
+                    residual_to_anchor_norm=float((
+                        residual.norm() / anchor_norm).item()),
+                ))
+        outputs = {
+            key: torch.stack([row[key] for row in rows], dim=0)
+            for key in ('final', 'semantic', 'semantic_raw', 'instance', 'presence')
+        }
+        return outputs, fusion_stats
+
+    def _rpt_head_change_block(self, name, outputs, baseline_class):
+        rows = []
+        for class_idx in range(self.num_cls):
+            semantic_mask = outputs['semantic'][class_idx] >= 0.5
+            instance_mask = outputs['instance'][class_idx] >= 0.5
+            intersection = (semantic_mask & instance_mask).sum().item()
+            union = (semantic_mask | instance_mask).sum().item()
+            rows.append(dict(
+                class_index=int(class_idx),
+                class_name=self.class_names[class_idx],
+                semantic_mean_delta=float((
+                    outputs['semantic'][class_idx]
+                    - baseline_class['semantic'][class_idx]).mean().item()),
+                semantic_abs_delta=float((
+                    outputs['semantic'][class_idx]
+                    - baseline_class['semantic'][class_idx]).abs().mean().item()),
+                instance_mean_delta=float((
+                    outputs['instance'][class_idx]
+                    - baseline_class['instance'][class_idx]).mean().item()),
+                instance_abs_delta=float((
+                    outputs['instance'][class_idx]
+                    - baseline_class['instance'][class_idx]).abs().mean().item()),
+                presence_delta=float((
+                    outputs['presence'][class_idx]
+                    - baseline_class['presence'][class_idx]).item()),
+                final_mean_delta=float((
+                    outputs['final'][class_idx]
+                    - baseline_class['final'][class_idx]).mean().item()),
+                semantic_instance_mask_iou=_safe_div(intersection, union),
+            ))
+        return dict(variant=name, classes=rows)
+
     def _rpt_e2e_refine_weights(
             self, state, cache, start_weights, anchor_raw_class,
             visual_evidence):
@@ -959,6 +1101,69 @@ class RolePromptTTAMixin:
                     _safe_log(refined[class_idx], self.role_prompt_tta_eps)
                     + self.role_prompt_tta_delta_max
                     * gate_value * torch.tanh(theta), dim=0)
+            if self.role_prompt_tta_e2e_measure_post and class_trace:
+                with torch.no_grad(), self._rpt_autocast_context():
+                    post_weights = refined[class_idx]
+                    post_fused, post_fused_mask = mask_aware_language_fusion(
+                        features[class_idx], masks[class_idx], post_weights,
+                        self.role_prompt_tta_eps)
+                    post_backbone = dict(image_backbone)
+                    post_backbone['language_features'] = post_fused[:, None]
+                    post_backbone['language_mask'] = post_fused_mask[None]
+                    post_outputs = model.forward_grounding(
+                        backbone_out=post_backbone,
+                        find_input=self.processor.find_stage,
+                        geometric_prompt=model._get_dummy_prompt(),
+                        find_target=None,
+                    )
+                    post_current = post_outputs['semantic_seg'].float()
+                    post_competitor = F.interpolate(
+                        other_raw[None, None],
+                        size=post_current.shape[-2:], mode='bilinear',
+                        align_corners=False)
+                    post_mask = F.interpolate(
+                        seed_mask, size=post_current.shape[-2:],
+                        mode='nearest').bool()
+                    post_binary = torch.sigmoid(
+                        (post_current - post_competitor)
+                        / max(self.role_prompt_tta_temperature,
+                              self.role_prompt_tta_eps))
+                    post_entropy = -(
+                        post_binary * _safe_log(
+                            post_binary, self.role_prompt_tta_eps)
+                        + (1.0 - post_binary) * _safe_log(
+                            1.0 - post_binary, self.role_prompt_tta_eps))
+                    post_entropy_loss = (
+                        post_entropy[post_mask].mean()
+                        if post_mask.any() else post_entropy.mean())
+                    post_kl = (
+                        post_weights * (
+                            _safe_log(
+                                post_weights, self.role_prompt_tta_eps)
+                            - _safe_log(
+                                start_weights[class_idx],
+                                self.role_prompt_tta_eps)
+                        )
+                    ).sum()
+                    post_loss = (
+                        post_entropy_loss
+                        + self.role_prompt_tta_anchor_lambda * post_kl)
+                class_trace[-1].update(dict(
+                    post_update_loss=float(post_loss.float().item()),
+                    post_update_binary_entropy=float(
+                        post_entropy_loss.float().item()),
+                    post_update_anchor_kl=float(post_kl.float().item()),
+                    post_update_weight_l1=float((
+                        refined[class_idx]
+                        - start_weights[class_idx]).abs().sum().item()),
+                    post_update_cuda_memory=cuda_memory_snapshot(self.device),
+                ))
+                del (
+                    post_weights, post_fused, post_fused_mask,
+                    post_backbone, post_outputs, post_current,
+                    post_competitor, post_mask, post_binary, post_entropy,
+                    post_entropy_loss, post_kl, post_loss,
+                )
             trajectories.append(dict(
                 class_index=int(class_idx),
                 class_name=self.class_names[class_idx],
@@ -997,9 +1202,277 @@ class RolePromptTTAMixin:
             ))
         return dict(name=name, classes=rows)
 
+    def _rpt_atlas_infer_single_view(
+            self, image, return_stats=False, return_components=False,
+            view_id=None, crop_box=None):
+        """Run the v2 functional atlas without making a diagnostic the method.
+
+        All prompt interventions share one SAM3 image encoding.  Variant maps
+        are transferred to CPU as soon as they are produced so large images do
+        not retain every diagnostic output on the SAM3 GPU simultaneously.
+        """
+        width, height = image.size
+        output_shape = (height, width)
+        remoteclip_device = self._rpt_remoteclip.device
+        memory_devices = [self.device]
+        if remoteclip_device != self.device:
+            memory_devices.append(remoteclip_device)
+        for memory_device in memory_devices:
+            if memory_device.type == 'cuda':
+                torch.cuda.reset_peak_memory_stats(memory_device)
+
+        state, cache, baseline, bank, candidate_stats = (
+            self._rpt_collect_prompt_outputs(image))
+        baseline_class = {
+            key: self._rpt_query_to_class(value)
+            for key, value in baseline.items()
+        }
+        class_count = int(self.num_cls)
+        prompt_count = int(self._rpt_prompt_bank['_prompt_count'])
+        if prompt_count != ATLAS_PROMPT_COUNT:
+            raise RuntimeError(
+                f'Atlas expected {ATLAS_PROMPT_COUNT} prompts; '
+                f'got {prompt_count}.')
+
+        anchor_weights = initial_prompt_weights(
+            class_count, prompt_count,
+            self.role_prompt_tta_anchor_mass, self.device)
+        visual = self._rpt_seed_and_visual_evidence(
+            image, baseline_class['semantic_raw'],
+            baseline_class['presence'])
+        zeros = torch.zeros_like(visual['affinity'])
+        ones = torch.ones_like(visual['presence_gate'])
+        if not self.role_prompt_tta_adapt_background:
+            ones[int(self.bg_idx)] = 0.0
+        visual_weights = prompt_weights_from_state(
+            anchor_weights, visual['affinity'], visual['presence_gate'], None,
+            self.role_prompt_tta_visual_strength,
+            self.role_prompt_tta_delta_max, self.role_prompt_tta_eps)
+        entropy_weights, _, entropy_trajectory = optimize_surrogate_weights(
+            bank['semantic_raw'], anchor_weights, zeros, ones,
+            baseline_class['semantic_raw'].argmax(dim=0),
+            self.role_prompt_tta_steps, self.role_prompt_tta_lr,
+            self.role_prompt_tta_temperature,
+            self.role_prompt_tta_anchor_lambda, 0.0,
+            self.role_prompt_tta_delta_max,
+            self.role_prompt_tta_class_balanced_entropy,
+            self.role_prompt_tta_eps)
+        full_weights, _, full_trajectory = optimize_surrogate_weights(
+            bank['semantic_raw'], anchor_weights, visual['affinity'],
+            visual['presence_gate'],
+            baseline_class['semantic_raw'].argmax(dim=0),
+            self.role_prompt_tta_steps, self.role_prompt_tta_lr,
+            self.role_prompt_tta_temperature,
+            self.role_prompt_tta_anchor_lambda,
+            self.role_prompt_tta_visual_strength,
+            self.role_prompt_tta_delta_max,
+            self.role_prompt_tta_class_balanced_entropy,
+            self.role_prompt_tta_eps)
+        e2e_weights, e2e_trajectory, e2e_classes = (
+            self._rpt_e2e_refine_weights(
+                state, cache, full_weights,
+                baseline_class['semantic_raw'], visual))
+
+        literal_weights = torch.zeros_like(anchor_weights)
+        literal_weights[:, 0] = 1.0
+        full_bg_literal_weights = full_weights.detach().clone()
+        full_bg_literal_weights[int(self.bg_idx)] = (
+            literal_weights[int(self.bg_idx)])
+        e2e_bg_literal_weights = e2e_weights.detach().clone()
+        e2e_bg_literal_weights[int(self.bg_idx)] = (
+            literal_weights[int(self.bg_idx)])
+
+        prompt_presence = bank['presence'].float().clamp_min(0.0)
+        presence_choice = prompt_presence.argmax(dim=1)
+        class_indices = torch.arange(class_count, device=self.device)
+        presence_selected = bank['final'][class_indices, presence_choice]
+        presence_denominator = prompt_presence.sum(dim=1, keepdim=True)
+        presence_weights = prompt_presence / presence_denominator.clamp_min(
+            self.role_prompt_tta_eps)
+        empty_presence = presence_denominator.squeeze(1) <= self.role_prompt_tta_eps
+        if empty_presence.any():
+            presence_weights[empty_presence] = literal_weights[empty_presence]
+
+        query_variants = OrderedDict()
+
+        def store_query(name, query_logits):
+            query_variants[name] = query_logits.detach().float().cpu()
+
+        def store_class(name, class_logits):
+            store_query(name, self._rpt_class_to_query(class_logits))
+
+        def weighted_output(weights):
+            return (weights[:, :, None, None] * bank['final']).sum(dim=1)
+
+        store_query('baseline', baseline['final'])
+        for prompt_idx, (variant_name, _) in enumerate(ATLAS_PROMPT_SLOTS):
+            store_class(variant_name, bank['final'][:, prompt_idx])
+        temporary = bank['final'].mean(dim=1)
+        store_class('pool_mean', temporary)
+        del temporary
+        temporary = bank['final'].max(dim=1)[0]
+        store_class('pool_max', temporary)
+        del temporary
+        for name, weights in (
+                ('anchor_output', anchor_weights),
+                ('visual_output', visual_weights),
+                ('entropy_output', entropy_weights),
+                ('full_output', full_weights),
+                ('full_bg_literal_output', full_bg_literal_weights)):
+            temporary = weighted_output(weights)
+            store_class(name, temporary)
+            del temporary
+        store_class('presence_selected_output', presence_selected)
+        del presence_selected
+        for name, weights in (
+                ('presence_weighted_output', presence_weights),
+                ('e2e_output', e2e_weights),
+                ('e2e_bg_literal_output', e2e_bg_literal_weights)):
+            temporary = weighted_output(weights)
+            store_class(name, temporary)
+            del temporary
+
+        reground_stats = {}
+        head_change = []
+        literal_reground, literal_fusion = self._rpt_reground_weights(
+            state, cache, literal_weights, output_shape)
+        store_class('literal_regrounded', literal_reground['final'])
+        literal_parity = {
+            key: float((
+                literal_reground[key].float()
+                - baseline_class[key].float()).abs().max().item())
+            for key in ('final', 'semantic', 'semantic_raw', 'instance', 'presence')
+        }
+        reground_stats['literal_regrounded'] = literal_fusion
+        head_change.append(self._rpt_head_change_block(
+            'literal_regrounded', literal_reground, baseline_class))
+        del literal_reground
+        if self.device.type == 'cuda':
+            torch.cuda.empty_cache()
+
+        for alpha, name in (
+                (0.10, 'anchor_residual_010_regrounded'),
+                (0.25, 'anchor_residual_025_regrounded')):
+            outputs, fusion = self._rpt_reground_anchor_residual(
+                state, cache, full_weights, output_shape, alpha)
+            store_class(name, outputs['final'])
+            reground_stats[name] = fusion
+            head_change.append(self._rpt_head_change_block(
+                name, outputs, baseline_class))
+            del outputs
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
+
+        full_sequence, full_sequence_fusion = self._rpt_reground_weights(
+            state, cache, full_weights, output_shape)
+        store_class('full_sequence_regrounded', full_sequence['final'])
+        reground_stats['full_sequence_regrounded'] = full_sequence_fusion
+        head_change.append(self._rpt_head_change_block(
+            'full_sequence_regrounded', full_sequence, baseline_class))
+        del full_sequence
+        if tuple(query_variants) != ATLAS_VARIANT_NAMES:
+            raise RuntimeError(
+                'Prompt functional atlas variant order drifted: '
+                f'{tuple(query_variants)}')
+
+        weight_stats = [
+            self._rpt_weights_stats('literal', literal_weights),
+            self._rpt_weights_stats('anchor', anchor_weights),
+            self._rpt_weights_stats('visual', visual_weights),
+            self._rpt_weights_stats('entropy', entropy_weights),
+            self._rpt_weights_stats('full', full_weights),
+            self._rpt_weights_stats('full_bg_literal', full_bg_literal_weights),
+            self._rpt_weights_stats('presence_weighted', presence_weights),
+            self._rpt_weights_stats('e2e', e2e_weights),
+            self._rpt_weights_stats(
+                'e2e_bg_literal', e2e_bg_literal_weights),
+        ]
+        view_stats = dict(
+            schema_version=ATLAS_SCHEMA_VERSION,
+            protocol=self.role_prompt_tta_protocol,
+            view_id=view_id,
+            crop_box=crop_box,
+            image_size=[width, height],
+            adaptation_unit='sam3_crop' if crop_box is not None else 'full_image',
+            baseline_reconstruction_max_abs=float(
+                self._rpt_native_parity_max_abs or 0.0),
+            literal_reground_parity_max_abs=literal_parity,
+            prompt_slots=[dict(
+                index=int(idx), variant=name, role=role)
+                for idx, (name, role) in enumerate(ATLAS_PROMPT_SLOTS)],
+            candidate_stats=candidate_stats,
+            presence_selected_indices=[
+                int(value) for value in presence_choice.detach().cpu().tolist()],
+            seed_counts=visual['seed_counts'],
+            seed_entropy=visual['seed_entropy'],
+            prototype_norms=visual['prototype_norms'],
+            presence_gate=[
+                float(value)
+                for value in visual['presence_gate'].cpu().tolist()],
+            visual_affinity=(
+                visual['affinity'].detach().float().cpu().tolist()),
+            remoteclip_grid_shape=visual['grid_shape'],
+            remoteclip_device=visual['remoteclip_device'],
+            seed_indices=[
+                torch.nonzero(mask.flatten(), as_tuple=False)
+                .flatten().detach().cpu().tolist()
+                for mask in visual['seed_masks']
+            ],
+            remoteclip_global_norm=visual['remoteclip_global_norm'],
+            anchor_entropy_mean=visual['anchor_entropy_mean'],
+            anchor_entropy_std=visual['anchor_entropy_std'],
+            weight_stats=weight_stats,
+            entropy_trajectory=entropy_trajectory,
+            full_trajectory=full_trajectory,
+            e2e_trajectory=e2e_trajectory,
+            e2e_updated_classes=e2e_classes,
+            language_fusion_stats=reground_stats,
+            head_change=head_change,
+            cuda_memory=dict(
+                main=cuda_memory_snapshot(self.device),
+                remoteclip=cuda_memory_snapshot(remoteclip_device),
+            ),
+        )
+
+        if self.role_prompt_tta_primary_variant == 'baseline':
+            primary_query = baseline['final']
+        else:
+            primary_query = query_variants[
+                self.role_prompt_tta_primary_variant].to(self.device)
+        components = dict(
+            semantic_logits=baseline['semantic'],
+            instance_logits=baseline['instance'],
+            role_prompt_variant_query_logits=query_variants,
+            role_prompt_view_stats=[view_stats],
+        )
+        stats = dict(
+            view_id=view_id,
+            crop_box=crop_box,
+            image_size=[width, height],
+            role_prompt_tta=view_stats,
+        )
+        del bank, baseline_class
+        if self.device.type == 'cuda':
+            torch.cuda.empty_cache()
+        if not return_stats and not return_components:
+            return primary_query
+        if return_stats and return_components:
+            return primary_query, stats, components
+        if return_stats:
+            return primary_query, stats
+        return primary_query, components
+
     def _rpt_infer_single_view(
             self, image, return_stats=False, return_components=False,
             view_id=None, crop_box=None):
+        if self.role_prompt_tta_protocol == 'prompt_functional_atlas_v2':
+            return self._rpt_atlas_infer_single_view(
+                image,
+                return_stats=return_stats,
+                return_components=return_components,
+                view_id=view_id,
+                crop_box=crop_box,
+            )
         width, height = image.size
         output_shape = (height, width)
         memory_devices = [self.device]
@@ -1120,7 +1593,7 @@ class RolePromptTTAMixin:
             ('full_regrounded_surrogate', full_reground['final']),
             ('full_regrounded_e2e', e2e_reground['final']),
         ])
-        if tuple(class_variants) != VARIANT_NAMES:
+        if tuple(class_variants) != V1_VARIANT_NAMES:
             raise RuntimeError('Role Prompt TTA variant order drifted.')
         query_variants = {
             name: (
@@ -1360,7 +1833,12 @@ class RolePromptTTAMixin:
         }
         baseline = predictions['baseline']
         variant_stats = {}
-        for name in VARIANT_NAMES:
+        variant_names = self._rpt_variant_names()
+        if tuple(variant_logits) != tuple(variant_names):
+            raise RuntimeError(
+                'Recorded prompt variant order drifted: '
+                f'{tuple(variant_logits)}')
+        for name in variant_names:
             pred = predictions[name]
             changed = valid & (pred != baseline)
             improved = changed & (pred == gt_data) & (baseline != gt_data)
@@ -1378,7 +1856,7 @@ class RolePromptTTAMixin:
                     int(improved.sum().item()), int(changed.sum().item())),
             )
         record = dict(
-            schema_version=SCHEMA_VERSION,
+            schema_version=self._rpt_record_schema_version(),
             rank=int(os.environ.get('RANK', 0)),
             local_rank=int(os.environ.get('LOCAL_RANK', 0)),
             dataset_name=self.role_prompt_tta_dataset_name,
@@ -1391,6 +1869,7 @@ class RolePromptTTAMixin:
             prompt_bank=os.path.abspath(self.role_prompt_tta_prompt_bank),
             prompt_count=int(self._rpt_prompt_bank['_prompt_count']),
             settings=dict(
+                protocol=self.role_prompt_tta_protocol,
                 remoteclip_device=str(self._rpt_remoteclip.device),
                 anchor_mass=self.role_prompt_tta_anchor_mass,
                 visual_strength=self.role_prompt_tta_visual_strength,
@@ -1406,6 +1885,7 @@ class RolePromptTTAMixin:
                 e2e_steps=self.role_prompt_tta_e2e_steps,
                 e2e_lr=self.role_prompt_tta_e2e_lr,
                 e2e_max_classes=self.role_prompt_tta_e2e_max_classes,
+                e2e_measure_post=self.role_prompt_tta_e2e_measure_post,
                 adapt_background=self.role_prompt_tta_adapt_background,
             ),
             variants=variant_stats,
