@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import subprocess
@@ -12,6 +13,19 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class RolePromptTTAStaticTest(unittest.TestCase):
+
+    def test_surrogate_optimizer_reenables_grad_locally(self):
+        path = os.path.join(ROOT, 'role_prompt_tta.py')
+        with open(path, encoding='utf-8') as handle:
+            source = handle.read()
+        tree = ast.parse(source, filename=path)
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == 'optimize_surrogate_weights')
+        function_source = ast.get_source_segment(source, function)
+        self.assertIn('with torch.enable_grad():', function_source)
+        self.assertIn('loss.backward()', function_source)
 
     def test_preflight_without_server_dependencies(self):
         result = subprocess.run(

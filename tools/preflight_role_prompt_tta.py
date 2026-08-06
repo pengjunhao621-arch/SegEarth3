@@ -144,9 +144,12 @@ def runtime_checks(report):
     raw = torch.randn(3, 5, 8, 8)
     affinity = torch.randn(3, 5)
     gate = torch.tensor([1.0, 0.5, 0.0])
-    adapted, _, trajectory = role.optimize_surrogate_weights(
-        raw, weights, affinity, gate, raw[:, 0].argmax(dim=0),
-        2, 0.05, 1.0, 0.05, 1.0, 1.0, True)
+    # Match MMEngine's evaluation context. The helper must locally restore
+    # gradients for its theta-only test-time optimization.
+    with torch.no_grad():
+        adapted, _, trajectory = role.optimize_surrogate_weights(
+            raw, weights, affinity, gate, raw[:, 0].argmax(dim=0),
+            2, 0.05, 1.0, 0.05, 1.0, 1.0, True)
     assert torch.isfinite(adapted).all()
     assert torch.allclose(adapted.sum(dim=1), torch.ones(3), atol=1e-5)
     assert len(trajectory) == 2 and trajectory[-1]['grad_norm'] > 0
@@ -161,7 +164,7 @@ def runtime_checks(report):
         'remoteclip_checkpoint_bytes': os.path.getsize(checkpoint),
         'remoteclip_model_load': 'ok',
         'remoteclip_parameter_count': remoteclip_parameter_count,
-        'tensor_helper_test': 'ok',
+        'tensor_helper_test': 'ok under outer torch.no_grad',
         'all_mmengine_configs': 'parsed',
     }
 

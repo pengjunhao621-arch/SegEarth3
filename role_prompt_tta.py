@@ -207,27 +207,36 @@ def optimize_surrogate_weights(
         semantic_raw, anchor_weights, visual_affinity, presence_gate,
         anchor_top1, steps, lr, temperature, anchor_lambda,
         visual_strength, delta_max, class_balanced=True, eps=1e-6):
-    theta = torch.zeros_like(anchor_weights, requires_grad=True)
-    optimizer = torch.optim.Adam([theta], lr=float(lr))
-    trajectory = []
-    for step in range(int(steps)):
-        optimizer.zero_grad()
-        weights = prompt_weights_from_state(
-            anchor_weights, visual_affinity, presence_gate, theta,
-            visual_strength, delta_max, eps)
-        loss, entropy_loss, kl, _ = prompt_weight_objective(
-            semantic_raw, weights, anchor_weights, anchor_top1,
-            temperature, anchor_lambda, class_balanced, eps)
-        loss.backward()
-        grad_norm = theta.grad.detach().float().norm()
-        optimizer.step()
-        trajectory.append(dict(
-            step=int(step + 1),
-            loss=float(loss.detach().item()),
-            entropy=float(entropy_loss.detach().item()),
-            anchor_kl=float(kl.detach().item()),
-            grad_norm=float(grad_norm.item()),
-        ))
+    # MMEngine's test loop executes model prediction under torch.no_grad().
+    # This helper is an explicit test-time optimizer, so its tiny theta-only
+    # graph must be constructed inside a local grad-enabled scope. The input
+    # maps remain detached and no model parameter is registered with Adam.
+    with torch.enable_grad():
+        theta = torch.zeros_like(anchor_weights, requires_grad=True)
+        optimizer = torch.optim.Adam([theta], lr=float(lr))
+        trajectory = []
+        for step in range(int(steps)):
+            optimizer.zero_grad()
+            weights = prompt_weights_from_state(
+                anchor_weights, visual_affinity, presence_gate, theta,
+                visual_strength, delta_max, eps)
+            loss, entropy_loss, kl, _ = prompt_weight_objective(
+                semantic_raw, weights, anchor_weights, anchor_top1,
+                temperature, anchor_lambda, class_balanced, eps)
+            loss.backward()
+            if theta.grad is None:
+                raise RuntimeError(
+                    'Surrogate prompt weights are disconnected from the '
+                    'test-time objective.')
+            grad_norm = theta.grad.detach().float().norm()
+            optimizer.step()
+            trajectory.append(dict(
+                step=int(step + 1),
+                loss=float(loss.detach().item()),
+                entropy=float(entropy_loss.detach().item()),
+                anchor_kl=float(kl.detach().item()),
+                grad_norm=float(grad_norm.item()),
+            ))
     with torch.no_grad():
         weights = prompt_weights_from_state(
             anchor_weights, visual_affinity, presence_gate, theta,
