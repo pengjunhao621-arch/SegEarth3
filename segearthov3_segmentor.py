@@ -2595,10 +2595,15 @@ class SegEarthOV3Segmentation(
             []
             if dual_head_fusion_preds is not None
             else None)
+        role_prompt_class_space = bool(
+            self._uses_role_prompt_tta()
+            and self.role_prompt_tta_protocol
+            == 'head_role_prompt_conflict_v1')
         role_prompt_tta_preds = (
             {
                 name: torch.zeros(
-                    (self.num_queries, h_img, w_img),
+                    ((self.num_cls if role_prompt_class_space
+                      else self.num_queries), h_img, w_img),
                     device='cpu',
                     dtype=torch.float32,
                 )
@@ -2731,12 +2736,15 @@ class SegEarthOV3Segmentation(
                             crop_components.get(
                                 'dual_head_fusion_prompt_stats', []))
                     if role_prompt_tta_preds is not None:
-                        crop_variants = crop_components.get(
-                            'role_prompt_variant_query_logits')
+                        crop_variant_key = (
+                            'role_prompt_variant_class_logits'
+                            if role_prompt_class_space
+                            else 'role_prompt_variant_query_logits')
+                        crop_variants = crop_components.get(crop_variant_key)
                         if not isinstance(crop_variants, dict):
                             raise RuntimeError(
-                                'Sliding role-prompt TTA is missing crop '
-                                'variant logits.')
+                                'Sliding role-prompt diagnostic is missing '
+                                f'{crop_variant_key}.')
                         for variant_name in self._rpt_variant_names():
                             role_prompt_tta_preds[
                                 variant_name][:, y1:y2, x1:x2] += (
@@ -2822,6 +2830,12 @@ class SegEarthOV3Segmentation(
                     role_prompt_tta_preds[variant_name] = (
                         role_prompt_tta_preds[variant_name]
                         / role_prompt_count_mat)
+                if role_prompt_class_space:
+                    # Synonym prompts must be averaged across crops before
+                    # their class-wise max, exactly as in the official path.
+                    role_prompt_tta_preds['baseline'] = (
+                        self._rpt_aggregate_query_logits_to_classes(
+                            preds.detach().float().cpu()))
             if coco_sec_prior_preds is not None:
                 coco_sec_prior_preds = coco_sec_prior_preds / count_mat
                 coco_sec_prior_preds = coco_sec_prior_preds.clamp_min(
@@ -2861,8 +2875,11 @@ class SegEarthOV3Segmentation(
             components['dual_head_fusion_prompt_stats'] = (
                 dual_head_fusion_prompt_stats)
         if return_components and role_prompt_tta_preds is not None:
-            components['role_prompt_variant_query_logits'] = (
-                role_prompt_tta_preds)
+            role_prompt_key = (
+                'role_prompt_variant_class_logits'
+                if role_prompt_class_space
+                else 'role_prompt_variant_query_logits')
+            components[role_prompt_key] = role_prompt_tta_preds
             components['role_prompt_view_stats'] = role_prompt_view_stats
         if (
                 return_components
@@ -16924,6 +16941,17 @@ class SegEarthOV3Segmentation(
                                 mode='bilinear',
                                 align_corners=False,
                             ).squeeze(0)
+                    role_class_variants = components.get(
+                        'role_prompt_variant_class_logits')
+                    if isinstance(role_class_variants, dict):
+                        for variant_name, variant_logits in list(
+                                role_class_variants.items()):
+                            role_class_variants[variant_name] = F.interpolate(
+                                variant_logits.unsqueeze(0),
+                                size=ori_shape,
+                                mode='bilinear',
+                                align_corners=False,
+                            ).squeeze(0)
 
             # Post-processing
             query_seg_logits = seg_logits
@@ -16955,6 +16983,8 @@ class SegEarthOV3Segmentation(
                                 query_logits)
                             for name, query_logits in value.items()
                         }
+                    elif key == 'role_prompt_variant_class_logits':
+                        aggregated_components[key] = value
                     elif key == 'presence_query_scores':
                         aggregated_components['presence_scores'] = (
                             self._aggregate_query_scores_to_classes(value))

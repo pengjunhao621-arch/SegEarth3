@@ -33,6 +33,14 @@ from prompt_functional_atlas_definitions import (
     SCHEMA_VERSION as ATLAS_SCHEMA_VERSION,
     VARIANT_NAMES as ATLAS_VARIANT_NAMES,
 )
+from head_role_prompt_conflict_definitions import (
+    DESCRIPTION_SLOTS as HEAD_ROLE_DESCRIPTION_SLOTS,
+    HEAD_PATHS as HEAD_ROLE_PATHS,
+    PROMPT_COUNT as HEAD_ROLE_PROMPT_COUNT,
+    SCHEMA_VERSION as HEAD_ROLE_SCHEMA_VERSION,
+    VARIANT_NAMES as HEAD_ROLE_VARIANT_NAMES,
+    variant_name as head_role_variant_name,
+)
 
 # Backward-compatible export used by existing configs/tests/summarization.
 VARIANT_NAMES = V1_VARIANT_NAMES
@@ -495,7 +503,8 @@ class RolePromptTTAMixin:
         self._rpt_native_parity_max_abs = None
 
         if self.role_prompt_tta_protocol not in (
-                'v1', 'prompt_functional_atlas_v2'):
+                'v1', 'prompt_functional_atlas_v2',
+                'head_role_prompt_conflict_v1'):
             raise ValueError(
                 f'Unknown role_prompt_tta_protocol='
                 f'{self.role_prompt_tta_protocol!r}.')
@@ -503,6 +512,13 @@ class RolePromptTTAMixin:
             raise ValueError(
                 f'Unknown role_prompt_tta_primary_variant='
                 f'{self.role_prompt_tta_primary_variant!r}.')
+        if (
+                self.role_prompt_tta_protocol
+                == 'head_role_prompt_conflict_v1'
+                and self.role_prompt_tta_primary_variant != 'baseline'):
+            raise ValueError(
+                'Head-role prompt conflict v1 is diagnostic-only and must '
+                'return the protected baseline as its primary prediction.')
         if self._uses_role_prompt_tta():
             if not role_prompt_tta_prompt_bank:
                 raise ValueError('role_prompt_tta_prompt_bank is required.')
@@ -516,21 +532,35 @@ class RolePromptTTAMixin:
                 raise ValueError(
                     'Prompt functional atlas v2 requires exactly '
                     f'{ATLAS_PROMPT_COUNT} role-controlled prompts per class.')
+            if (
+                    self.role_prompt_tta_protocol
+                    == 'head_role_prompt_conflict_v1'
+                    and int(self._rpt_prompt_bank['_prompt_count'])
+                    != HEAD_ROLE_PROMPT_COUNT):
+                raise ValueError(
+                    'Head-role prompt conflict v1 requires exactly '
+                    f'{HEAD_ROLE_PROMPT_COUNT} prompts per class.')
             descriptions = [
                 description
                 for item in self._rpt_prompt_bank['classes']
                 for description in item['descriptions']
             ]
-            self._rpt_remoteclip = RemoteCLIPRuntime(
-                checkpoint=os.path.abspath(
-                    self.role_prompt_tta_remoteclip_checkpoint),
-                source_root=os.path.abspath(
-                    self.role_prompt_tta_remoteclip_source_root),
-                model_name=self.role_prompt_tta_remoteclip_model,
-                device=resolve_remoteclip_device(
-                    self.role_prompt_tta_remoteclip_device, self.device),
-            )
-            self._rpt_remoteclip_descriptions = descriptions
+            if self.role_prompt_tta_protocol == 'head_role_prompt_conflict_v1':
+                # This audit is native-SAM3 only.  Avoid loading RemoteCLIP or
+                # constructing any test-time optimization graph.
+                self._rpt_remoteclip = None
+                self._rpt_remoteclip_descriptions = None
+            else:
+                self._rpt_remoteclip = RemoteCLIPRuntime(
+                    checkpoint=os.path.abspath(
+                        self.role_prompt_tta_remoteclip_checkpoint),
+                    source_root=os.path.abspath(
+                        self.role_prompt_tta_remoteclip_source_root),
+                    model_name=self.role_prompt_tta_remoteclip_model,
+                    device=resolve_remoteclip_device(
+                        self.role_prompt_tta_remoteclip_device, self.device),
+                )
+                self._rpt_remoteclip_descriptions = descriptions
             # SAM3 is frozen only for the enabled TTA experiment.  The official
             # baseline's default construction remains untouched.
             for parameter in self.processor.model.parameters():
@@ -546,11 +576,17 @@ class RolePromptTTAMixin:
 
     def _rpt_variant_names(self):
         if getattr(self, 'role_prompt_tta_protocol', 'v1') \
+                == 'head_role_prompt_conflict_v1':
+            return HEAD_ROLE_VARIANT_NAMES
+        if getattr(self, 'role_prompt_tta_protocol', 'v1') \
                 == 'prompt_functional_atlas_v2':
             return ATLAS_VARIANT_NAMES
         return V1_VARIANT_NAMES
 
     def _rpt_record_schema_version(self):
+        if getattr(self, 'role_prompt_tta_protocol', 'v1') \
+                == 'head_role_prompt_conflict_v1':
+            return HEAD_ROLE_SCHEMA_VERSION
         if getattr(self, 'role_prompt_tta_protocol', 'v1') \
                 == 'prompt_functional_atlas_v2':
             return ATLAS_SCHEMA_VERSION
@@ -581,10 +617,17 @@ class RolePromptTTAMixin:
         language_features = text_outputs['language_features'].detach().clone()
         language_mask = text_outputs['language_mask'].detach().clone()
         # Preserve the protected baseline exactly: original query strings are
-        # encoded one at a time, matching set_text_prompt.  The expanded bank
-        # remains batched/cached for efficiency.
+        # encoded one at a time, matching set_text_prompt.  The head-role
+        # audit extends this identity rule to every description because its
+        # claim depends on independently native grounding, not batched-text
+        # numerical behavior. Other protocols retain their original cache.
+        prompts_to_encode_individually = (
+            all_prompts
+            if self.role_prompt_tta_protocol
+            == 'head_role_prompt_conflict_v1'
+            else self.query_words)
         with torch.no_grad(), self._rpt_autocast_context():
-            for prompt in self.query_words:
+            for prompt in prompts_to_encode_individually:
                 single = self.processor.model.backbone.forward_text(
                     [prompt], device=self.device)
                 prompt_index = index[prompt]
@@ -1213,6 +1256,404 @@ class RolePromptTTAMixin:
             ))
         return dict(name=name, classes=rows)
 
+    def _rpt_head_role_raw_package(self, state, output_shape):
+        """Detach one native SAM3 prompt into auditable head-role sources."""
+        native = self._rpt_prompt_components(state, output_shape)
+        raw_masks = state.get('raw_masks_logits_lowres')
+        raw_scores = state.get('raw_object_score')
+        if not isinstance(raw_masks, torch.Tensor):
+            raw_masks = torch.empty((0, 1, 1), dtype=torch.float32)
+        if not isinstance(raw_scores, torch.Tensor):
+            raw_scores = torch.empty((0,), dtype=torch.float32)
+        return dict(
+            semantic=native['semantic'].detach().float().cpu(),
+            native_instance=native['instance'].detach().float().cpu(),
+            native_final=native['final'].detach().float().cpu(),
+            presence=native['presence'].detach().cpu(),
+            # Keep every raw query, not only candidates retained by the
+            # original prompt's Presence value. Counterfactual Presence must
+            # be allowed to change the native hard candidate set.
+            raw_masks=raw_masks.detach().cpu(),
+            raw_scores=raw_scores.detach().cpu(),
+            native_kept_count=int(native['kept_candidate_count']),
+            raw_candidate_count=int(native['raw_candidate_count']),
+        )
+
+    def _rpt_head_role_instance_from_raw(
+            self, raw_package, presence, output_shape):
+        """Reapply SAM3's native query gate with a chosen Presence source."""
+        height, width = output_shape
+        if not self.use_transformer_decoder:
+            return torch.zeros((height, width), dtype=torch.float32), 0
+        raw_masks = raw_package['raw_masks']
+        raw_scores = raw_package['raw_scores']
+        count = min(int(raw_masks.shape[0]), int(raw_scores.numel()))
+        if count <= 0:
+            return torch.zeros((height, width), dtype=torch.float32), 0
+        raw_scores_device = raw_scores[:count].to(self.device)
+        presence_device = torch.as_tensor(
+            presence,
+            device=self.device,
+            dtype=raw_scores_device.dtype,
+        )
+        with torch.no_grad(), self._rpt_autocast_context():
+            candidate_scores = raw_scores_device * presence_device
+            keep = candidate_scores > float(
+                self.processor.confidence_threshold)
+        kept_count = int(keep.sum().item())
+        if kept_count == 0:
+            return torch.zeros((height, width), dtype=torch.float32), 0
+        selected_masks = raw_masks[:count].to(self.device)[keep]
+        with torch.no_grad(), self._rpt_autocast_context():
+            selected_masks = F.interpolate(
+                selected_masks.unsqueeze(1),
+                size=output_shape,
+                mode='bilinear',
+                align_corners=False,
+            ).sigmoid().squeeze(1)
+            if self.instance_score_type == 'raw':
+                amplitudes = raw_scores_device[keep].to(
+                    dtype=selected_masks.dtype)
+            else:
+                amplitudes = candidate_scores[keep].to(
+                    dtype=selected_masks.dtype)
+            instance = (
+                selected_masks.float() * amplitudes.float()[:, None, None]
+            ).max(dim=0)[0]
+        return instance.detach().float().cpu(), kept_count
+
+    def _rpt_head_role_compose(
+            self, semantic_package, instance_package, presence_package,
+            output_shape, instance_override=None):
+        semantic = (
+            semantic_package['semantic']
+            if self.use_sem_seg
+            else torch.zeros(output_shape, dtype=torch.float32))
+        presence = float(
+            torch.as_tensor(presence_package['presence']).float().item())
+        if instance_override is None:
+            instance, kept_count = self._rpt_head_role_instance_from_raw(
+                instance_package, presence, output_shape)
+        else:
+            instance, kept_count = instance_override
+        final = torch.maximum(semantic.float(), instance.float())
+        if self.use_presence_score:
+            final = final * presence
+        return final, instance, kept_count
+
+    @staticmethod
+    def _rpt_head_role_mask_iou(left, right, threshold=0.5):
+        left = left >= float(threshold)
+        right = right >= float(threshold)
+        intersection = int((left & right).sum().item())
+        union = int((left | right).sum().item())
+        return _safe_div(intersection, union)
+
+    def _rpt_head_role_infer_single_view(
+            self, image, return_stats=False, return_components=False,
+            view_id=None, crop_box=None):
+        """Assign independently grounded prompts to SAM3 output roles.
+
+        The primary prediction is always the exact protected baseline.  Every
+        alternative description is grounded normally by SAM3 before its
+        semantic, raw instance-query, or Presence result is used.  No token or
+        contextual-language feature is synthesized across prompts.
+        """
+        width, height = image.size
+        output_shape = (height, width)
+        if self.device.type == 'cuda':
+            torch.cuda.reset_peak_memory_stats(self.device)
+        cache = self._rpt_prepare_text_cache()
+
+        with torch.no_grad(), self._rpt_autocast_context():
+            state = self.processor.set_image(image)
+            baseline_rows = []
+            parity_errors = []
+            for prompt in self.query_words:
+                native_row = None
+                if not self._rpt_native_parity_checked:
+                    self.processor.reset_all_prompts(state)
+                    self.processor.set_text_prompt(prompt, state)
+                    native_row = self._rpt_prompt_components(
+                        state, output_shape)
+                self._rpt_set_cached_prompt(state, prompt)
+                cached_row = self._rpt_prompt_components(state, output_shape)
+                if native_row is not None:
+                    for key in (
+                            'final', 'semantic', 'semantic_raw',
+                            'instance', 'presence'):
+                        parity_errors.append(float((
+                            cached_row[key].float()
+                            - native_row[key].float()).abs().max().item()))
+                baseline_rows.append({
+                    key: cached_row[key].detach().float().cpu()
+                    for key in ('final', 'semantic', 'instance')
+                })
+            if not self._rpt_native_parity_checked:
+                self._rpt_native_parity_max_abs = max(parity_errors or [0.0])
+                self._rpt_native_parity_checked = True
+                if (
+                        self.role_prompt_tta_strict_integrity
+                        and self._rpt_native_parity_max_abs
+                        > self.role_prompt_tta_integrity_tolerance):
+                    raise RuntimeError(
+                        'Cached prompt path differs from protected native '
+                        f'prompt path: max_abs='
+                        f'{self._rpt_native_parity_max_abs}.')
+
+        baseline_query = {
+            key: torch.stack([row[key] for row in baseline_rows], dim=0)
+            for key in ('final', 'semantic', 'instance')
+        }
+        baseline_class = self._rpt_query_to_class(
+            baseline_query['final']).detach().float().cpu()
+        class_variants = OrderedDict(
+            (name, torch.empty(
+                (int(self.num_cls), height, width),
+                device='cpu', dtype=torch.float32))
+            for name in HEAD_ROLE_VARIANT_NAMES)
+        class_variants['baseline'].copy_(baseline_class)
+        head_role_rows = []
+        raw_recomposition_errors = []
+
+        for class_idx, item in enumerate(self._rpt_prompt_bank['classes']):
+            literal_prompt = item['descriptions'][0]
+            with torch.no_grad(), self._rpt_autocast_context():
+                self._rpt_set_cached_prompt(state, literal_prompt)
+                literal = self._rpt_head_role_raw_package(
+                    state, output_shape)
+            literal_rebuilt_instance = self._rpt_head_role_instance_from_raw(
+                literal, literal['presence'], output_shape)
+            literal_rebuilt, _, _ = self._rpt_head_role_compose(
+                literal, literal, literal, output_shape,
+                instance_override=literal_rebuilt_instance)
+            literal_error = float((
+                literal_rebuilt - literal['native_final']).abs().max().item())
+            literal_instance_error = float((
+                literal_rebuilt_instance[0]
+                - literal['native_instance']).abs().max().item())
+            raw_recomposition_errors.extend(
+                [literal_error, literal_instance_error])
+            class_variants['literal_native'][class_idx].copy_(
+                literal['native_final'])
+
+            for prompt_slot, prompt_role in HEAD_ROLE_DESCRIPTION_SLOTS:
+                description_prompt = item['descriptions'][prompt_slot]
+                with torch.no_grad(), self._rpt_autocast_context():
+                    self._rpt_set_cached_prompt(state, description_prompt)
+                    description = self._rpt_head_role_raw_package(
+                        state, output_shape)
+
+                description_native_instance = (
+                    self._rpt_head_role_instance_from_raw(
+                        description, description['presence'], output_shape))
+                description_rebuilt, _, _ = self._rpt_head_role_compose(
+                    description, description, description, output_shape,
+                    instance_override=description_native_instance)
+                native_error = float((
+                    description_rebuilt
+                    - description['native_final']).abs().max().item())
+                native_instance_error = float((
+                    description_native_instance[0]
+                    - description['native_instance']).abs().max().item())
+                raw_recomposition_errors.extend(
+                    [native_error, native_instance_error])
+
+                description_instance_literal_presence = (
+                    self._rpt_head_role_instance_from_raw(
+                        description, literal['presence'], output_shape))
+                literal_instance_description_presence = (
+                    self._rpt_head_role_instance_from_raw(
+                        literal, description['presence'], output_shape))
+
+                path_maps = {}
+                for path_name, semantic_source, instance_source, presence_source \
+                        in HEAD_ROLE_PATHS:
+                    if path_name == 'native':
+                        final = description['native_final']
+                        instance = description['native_instance']
+                        kept_count = description['native_kept_count']
+                    else:
+                        semantic_package = (
+                            description if semantic_source == 'description'
+                            else literal)
+                        instance_package = (
+                            description if instance_source == 'description'
+                            else literal)
+                        presence_package = (
+                            description if presence_source == 'description'
+                            else literal)
+                        if (
+                                instance_source == 'description'
+                                and presence_source == 'literal'):
+                            instance_override = (
+                                description_instance_literal_presence)
+                        elif (
+                                instance_source == 'literal'
+                                and presence_source == 'description'):
+                            instance_override = (
+                                literal_instance_description_presence)
+                        elif (
+                                instance_source == 'literal'
+                                and presence_source == 'literal'):
+                            instance_override = literal_rebuilt_instance
+                        else:
+                            instance_override = description_native_instance
+                        final, instance, kept_count = (
+                            self._rpt_head_role_compose(
+                                semantic_package,
+                                instance_package,
+                                presence_package,
+                                output_shape,
+                                instance_override=instance_override,
+                            ))
+                    name = head_role_variant_name(prompt_slot, path_name)
+                    class_variants[name][class_idx].copy_(
+                        final.detach().float().cpu())
+                    path_maps[path_name] = dict(
+                        final=final,
+                        instance=instance,
+                        kept_count=int(kept_count),
+                    )
+
+                raw_scores = description['raw_scores']
+                literal_cache_index = int(cache['index'][literal_prompt])
+                description_cache_index = int(
+                    cache['index'][description_prompt])
+                head_role_rows.append(dict(
+                    class_index=int(class_idx),
+                    class_name=item['name'],
+                    prompt_slot=int(prompt_slot),
+                    prompt_role=prompt_role,
+                    literal_prompt=literal_prompt,
+                    description_prompt=description_prompt,
+                    literal_token_count=int((
+                        ~cache['language_mask'][literal_cache_index].bool()
+                    ).sum().item()),
+                    description_token_count=int((
+                        ~cache['language_mask'][description_cache_index].bool()
+                    ).sum().item()),
+                    description_word_count=len(description_prompt.split()),
+                    description_character_count=len(description_prompt),
+                    literal_presence=float(literal['presence']),
+                    description_presence=float(description['presence']),
+                    presence_delta=float(
+                        description['presence'] - literal['presence']),
+                    literal_semantic_mean=float(
+                        literal['semantic'].mean().item()),
+                    description_semantic_mean=float(
+                        description['semantic'].mean().item()),
+                    description_semantic_area_050=float((
+                        description['semantic'] >= 0.5).float().mean().item()),
+                    literal_instance_mean=float(
+                        literal['native_instance'].mean().item()),
+                    description_instance_mean=float(
+                        description['native_instance'].mean().item()),
+                    semantic_abs_change=float((
+                        description['semantic']
+                        - literal['semantic']).abs().mean().item()),
+                    instance_abs_change_native=float((
+                        description['native_instance']
+                        - literal['native_instance']).abs().mean().item()),
+                    semantic_instance_iou=float(
+                        self._rpt_head_role_mask_iou(
+                            description['semantic'],
+                            description['native_instance'])),
+                    raw_object_score_mean=(
+                        float(raw_scores.mean().item())
+                        if raw_scores.numel() else 0.0),
+                    raw_object_score_max=(
+                        float(raw_scores.max().item())
+                        if raw_scores.numel() else 0.0),
+                    raw_candidate_count=int(
+                        description['raw_candidate_count']),
+                    literal_raw_candidate_count=int(
+                        literal['raw_candidate_count']),
+                    literal_native_kept_count=int(
+                        literal['native_kept_count']),
+                    native_kept_count=int(
+                        description['native_kept_count']),
+                    description_instance_literal_presence_kept_count=int(
+                        description_instance_literal_presence[1]),
+                    literal_instance_description_presence_kept_count=int(
+                        literal_instance_description_presence[1]),
+                    native_recomposition_max_abs=native_error,
+                    native_instance_recomposition_max_abs=(
+                        native_instance_error),
+                    path_final_means={
+                        name: float(values['final'].mean().item())
+                        for name, values in path_maps.items()
+                    },
+                    path_kept_counts={
+                        name: int(values['kept_count'])
+                        for name, values in path_maps.items()
+                    },
+                ))
+                del description
+                if self.device.type == 'cuda':
+                    torch.cuda.empty_cache()
+            del literal
+
+        if tuple(class_variants) != HEAD_ROLE_VARIANT_NAMES:
+            raise RuntimeError(
+                'Head-role prompt-conflict variant order drifted: '
+                f'{tuple(class_variants)}')
+        raw_recomposition_max_abs = max(raw_recomposition_errors or [0.0])
+        if (
+                self.role_prompt_tta_strict_integrity
+                and raw_recomposition_max_abs
+                > self.role_prompt_tta_integrity_tolerance):
+            raise RuntimeError(
+                'Raw-query native recomposition failed: max_abs='
+                f'{raw_recomposition_max_abs}.')
+
+        literal_vs_official = float((
+            class_variants['literal_native']
+            - class_variants['baseline']).abs().max().item())
+        diagnostic_cpu_bytes = int(sum(
+            value.numel() * value.element_size()
+            for value in class_variants.values()))
+        view_stats = dict(
+            schema_version=HEAD_ROLE_SCHEMA_VERSION,
+            protocol=self.role_prompt_tta_protocol,
+            view_id=view_id,
+            crop_box=crop_box,
+            image_size=[width, height],
+            adaptation_unit='sam3_crop' if crop_box is not None else 'full_image',
+            baseline_reconstruction_max_abs=float(
+                self._rpt_native_parity_max_abs or 0.0),
+            raw_recomposition_max_abs=float(raw_recomposition_max_abs),
+            literal_vs_official_max_abs=literal_vs_official,
+            official_query_count=int(self.num_queries),
+            canonical_class_count=int(self.num_cls),
+            synonym_query_count=int(self.num_queries - self.num_cls),
+            diagnostic_variant_count=len(class_variants),
+            diagnostic_cpu_bytes=diagnostic_cpu_bytes,
+            head_role_rows=head_role_rows,
+            cuda_memory=dict(main=cuda_memory_snapshot(self.device)),
+        )
+
+        primary_query = baseline_query['final'].to(self.device)
+        components = dict(
+            semantic_logits=baseline_query['semantic'].to(self.device),
+            instance_logits=baseline_query['instance'].to(self.device),
+            role_prompt_variant_class_logits=class_variants,
+            role_prompt_view_stats=[view_stats],
+        )
+        stats = dict(
+            view_id=view_id,
+            crop_box=crop_box,
+            image_size=[width, height],
+            role_prompt_tta=view_stats,
+        )
+        if not return_stats and not return_components:
+            return primary_query
+        if return_stats and return_components:
+            return primary_query, stats, components
+        if return_stats:
+            return primary_query, stats
+        return primary_query, components
+
     def _rpt_atlas_infer_single_view(
             self, image, return_stats=False, return_components=False,
             view_id=None, crop_box=None):
@@ -1476,6 +1917,14 @@ class RolePromptTTAMixin:
     def _rpt_infer_single_view(
             self, image, return_stats=False, return_components=False,
             view_id=None, crop_box=None):
+        if self.role_prompt_tta_protocol == 'head_role_prompt_conflict_v1':
+            return self._rpt_head_role_infer_single_view(
+                image,
+                return_stats=return_stats,
+                return_components=return_components,
+                view_id=view_id,
+                crop_box=crop_box,
+            )
         if self.role_prompt_tta_protocol == 'prompt_functional_atlas_v2':
             return self._rpt_atlas_infer_single_view(
                 image,
@@ -1838,8 +2287,15 @@ class RolePromptTTAMixin:
         valid = gt_data != 255
         if not valid.any():
             return
+        compact_predictions = (
+            self.role_prompt_tta_protocol
+            == 'head_role_prompt_conflict_v1')
         predictions = {
-            name: self._rpt_threshold(logits.detach().float().cpu())
+            name: (
+                self._rpt_threshold(logits.detach().float().cpu())
+                .to(torch.int16)
+                if compact_predictions
+                else self._rpt_threshold(logits.detach().float().cpu()))
             for name, logits in variant_logits.items()
         }
         baseline = predictions['baseline']
@@ -1881,7 +2337,9 @@ class RolePromptTTAMixin:
             prompt_count=int(self._rpt_prompt_bank['_prompt_count']),
             settings=dict(
                 protocol=self.role_prompt_tta_protocol,
-                remoteclip_device=str(self._rpt_remoteclip.device),
+                remoteclip_device=(
+                    None if self._rpt_remoteclip is None
+                    else str(self._rpt_remoteclip.device)),
                 anchor_mass=self.role_prompt_tta_anchor_mass,
                 visual_strength=self.role_prompt_tta_visual_strength,
                 presence_threshold=self.role_prompt_tta_presence_threshold,
@@ -1900,7 +2358,12 @@ class RolePromptTTAMixin:
                 adapt_background=self.role_prompt_tta_adapt_background,
             ),
             variants=variant_stats,
-            views=self._rpt_enrich_seed_stats_with_gt(view_stats, gt_data),
+            views=(
+                [dict(view) for view in view_stats]
+                if self.role_prompt_tta_protocol
+                == 'head_role_prompt_conflict_v1'
+                else self._rpt_enrich_seed_stats_with_gt(
+                    view_stats, gt_data)),
         )
         self._rpt_write_stats(record)
         self._rpt_save_artifact(image_path, predictions, gt_data, valid)
