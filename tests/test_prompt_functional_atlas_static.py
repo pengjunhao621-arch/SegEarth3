@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import subprocess
@@ -40,6 +41,20 @@ class PromptFunctionalAtlasStaticTest(unittest.TestCase):
             role)
         self.assertIn('post_update_loss', role)
         self.assertIn('_rpt_reground_anchor_residual', role)
+
+    def test_anchor_residual_restores_native_language_dtype(self):
+        with open(os.path.join(ROOT, 'role_prompt_tta.py'),
+                  encoding='utf-8') as handle:
+            source = handle.read()
+        tree = ast.parse(source, filename='role_prompt_tta.py')
+        method = next(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name == '_rpt_reground_anchor_residual')
+        method_source = ast.get_source_segment(source, method)
+        self.assertIn('anchor[overlap].float()', method_source)
+        self.assertIn('target[overlap].float()', method_source)
+        self.assertIn('updated.to(dtype=fused.dtype)', method_source)
 
     def test_synthetic_summary_preserves_contract(self):
         with tempfile.TemporaryDirectory() as directory:

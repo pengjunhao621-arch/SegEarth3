@@ -901,9 +901,17 @@ class RolePromptTTAMixin:
                 anchor_mask = masks[class_idx, 0].bool()
                 overlap = (~anchor_mask) & (~target_mask.bool())
                 fused = anchor.clone()
-                fused[overlap] = (
-                    anchor[overlap]
-                    + alpha * (target[overlap] - anchor[overlap]))
+                # Under CUDA autocast the cached SAM3 anchor is BF16, while
+                # mask-aware fusion can promote the weighted target to FP32.
+                # Boolean index assignment does not cast implicitly. Compute
+                # the bounded residual in FP32 for numerical stability, then
+                # restore SAM3's native language-feature dtype explicitly.
+                updated = (
+                    anchor[overlap].float()
+                    + alpha * (
+                        target[overlap].float()
+                        - anchor[overlap].float()))
+                fused[overlap] = updated.to(dtype=fused.dtype)
                 fused_mask = anchor_mask.clone()
                 self.processor.reset_all_prompts(state)
                 state['backbone_out']['language_features'] = fused[:, None]
@@ -920,6 +928,9 @@ class RolePromptTTAMixin:
                     alpha=alpha,
                     valid_tokens=int(valid.sum().item()),
                     overlap_tokens=int(overlap.sum().item()),
+                    anchor_dtype=str(anchor.dtype),
+                    target_dtype=str(target.dtype),
+                    fused_dtype=str(fused.dtype),
                     raw_candidate_count=int(rows[-1]['raw_candidate_count']),
                     kept_candidate_count=int(rows[-1]['kept_candidate_count']),
                     residual_to_anchor_norm=float((
