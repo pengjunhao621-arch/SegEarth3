@@ -48,6 +48,20 @@ class HeadRolePromptConflictStaticTest(unittest.TestCase):
         self.assertIn('raw_scores_device * presence_device', source)
         self.assertIn('self.processor.confidence_threshold', source)
         self.assertIn('raw_masks[:count].to(self.device)[keep]', source)
+        self.assertIn('sam3_interpolate(', source)
+        self.assertNotIn('F.interpolate(', source)
+
+        imports = [
+            node for node in tree.body
+            if isinstance(node, ast.ImportFrom)
+            and node.module == 'sam3.model.data_misc'
+        ]
+        self.assertEqual(len(imports), 1)
+        self.assertTrue(any(
+            alias.name == 'interpolate'
+            and alias.asname == 'sam3_interpolate'
+            for alias in imports[0].names
+        ))
 
     def test_variant_contract_covers_five_paths_per_description(self):
         self.assertEqual(

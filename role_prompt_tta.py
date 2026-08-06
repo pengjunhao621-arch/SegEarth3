@@ -23,6 +23,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from sam3.model.data_misc import interpolate as sam3_interpolate
+
 from role_prompt_tta_definitions import (
     SCHEMA_VERSION,
     VARIANT_NAMES as V1_VARIANT_NAMES,
@@ -1305,7 +1307,12 @@ class RolePromptTTAMixin:
             return torch.zeros((height, width), dtype=torch.float32), 0
         selected_masks = raw_masks[:count].to(self.device)[keep]
         with torch.no_grad(), self._rpt_autocast_context():
-            selected_masks = F.interpolate(
+            # Match Sam3Processor._forward_grounding exactly.  SAM3's
+            # compatibility interpolator promotes BF16 masks to FP32 for the
+            # resize and restores the original dtype afterwards; direct
+            # F.interpolate fails on the project's PyTorch 1.13 server because
+            # upsample_bilinear2d has no BF16 implementation there.
+            selected_masks = sam3_interpolate(
                 selected_masks.unsqueeze(1),
                 size=output_shape,
                 mode='bilinear',
