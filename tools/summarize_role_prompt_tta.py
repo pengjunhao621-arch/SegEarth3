@@ -278,6 +278,14 @@ def summarize_dataset(dataset, records):
                 view.get('anchor_entropy_mean'))
             mechanism['remoteclip_global_norm'].append(
                 view.get('remoteclip_global_norm'))
+            for role, snapshot in view.get('cuda_memory', {}).items():
+                if not isinstance(snapshot, dict):
+                    continue
+                for key in (
+                        'allocated_mb', 'reserved_mb',
+                        'peak_allocated_mb', 'peak_reserved_mb'):
+                    mechanism[f'cuda_{role}_{key}'].append(
+                        snapshot.get(key))
             for trajectory_name in (
                     'entropy_trajectory', 'full_trajectory',
                     'no_anchor_trajectory', 'no_presence_trajectory'):
@@ -296,6 +304,21 @@ def summarize_dataset(dataset, records):
                     mechanism['e2e_loss_end'].append(steps[-1].get('loss'))
                     mechanism['e2e_grad_norm'].append(
                         mean([step.get('grad_norm') for step in steps]))
+                    for stage in (
+                            'before_forward', 'after_forward',
+                            'after_backward'):
+                        mechanism[
+                            f'e2e_cuda_{stage}_peak_allocated_mb'].append(
+                                max([
+                                    float(step.get('cuda_memory', {})
+                                          .get(stage, {})
+                                          .get('peak_allocated_mb'))
+                                    for step in steps
+                                    if finite(
+                                        step.get('cuda_memory', {})
+                                        .get(stage, {})
+                                        .get('peak_allocated_mb'))
+                                ] or [None]))
 
     metrics = {name: confusion_metrics(matrix) for name, matrix in matrices.items()}
     baseline = metrics['baseline']

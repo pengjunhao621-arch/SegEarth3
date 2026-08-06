@@ -705,6 +705,7 @@ class SegEarthOV3Segmentation(
                  role_prompt_tta_remoteclip_checkpoint='weights/remoteclip/RemoteCLIP-ViT-L-14.pt',
                  role_prompt_tta_remoteclip_source_root='SCORE-main',
                  role_prompt_tta_remoteclip_model='ViT-L-14',
+                 role_prompt_tta_remoteclip_device='same',
                  role_prompt_tta_primary_variant='full_regrounded_e2e',
                  role_prompt_tta_anchor_mass=0.50,
                  role_prompt_tta_visual_strength=1.0,
@@ -1705,6 +1706,8 @@ class SegEarthOV3Segmentation(
             role_prompt_tta_remoteclip_source_root=(
                 role_prompt_tta_remoteclip_source_root),
             role_prompt_tta_remoteclip_model=role_prompt_tta_remoteclip_model,
+            role_prompt_tta_remoteclip_device=(
+                role_prompt_tta_remoteclip_device),
             role_prompt_tta_primary_variant=role_prompt_tta_primary_variant,
             role_prompt_tta_anchor_mass=role_prompt_tta_anchor_mass,
             role_prompt_tta_visual_strength=role_prompt_tta_visual_strength,

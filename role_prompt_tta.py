@@ -33,6 +33,63 @@ def _safe_log(value, eps):
     return torch.log(value.clamp_min(float(eps)))
 
 
+def resolve_remoteclip_device(requested, main_device):
+    """Resolve an optional RemoteCLIP device without changing DDP ownership.
+
+    ``aux`` reserves one additional visible CUDA device per local DDP rank.
+    For example, with four visible GPUs and two ranks, SAM3 uses cuda:0/1 and
+    RemoteCLIP uses cuda:2/3.  This is model placement, not model parallelism.
+    """
+    main_device = torch.device(main_device)
+    requested = 'same' if requested is None else str(requested).strip().lower()
+    if requested in ('', 'same', 'main'):
+        return main_device
+    if requested == 'aux':
+        if main_device.type != 'cuda' or not torch.cuda.is_available():
+            raise RuntimeError(
+                'role_prompt_tta_remoteclip_device=aux requires CUDA.')
+        local_rank = int(os.environ.get('LOCAL_RANK', main_device.index or 0))
+        local_world_size = int(os.environ.get('LOCAL_WORLD_SIZE', 1))
+        candidate = local_rank + local_world_size
+        device_count = int(torch.cuda.device_count())
+        if candidate >= device_count:
+            raise RuntimeError(
+                'RemoteCLIP aux placement needs at least two visible CUDA '
+                'devices per local evaluation rank. For two ranks use, for '
+                'example, GPU_LIST=0,1,2,3 NPROC=2 '
+                'REMOTECLIP_DEVICE=aux; do not use NPROC=4.')
+        return torch.device(f'cuda:{candidate}')
+    device = torch.device(requested)
+    if device.type == 'cuda':
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                f'RemoteCLIP device {requested!r} requires CUDA.')
+        index = 0 if device.index is None else int(device.index)
+        if index >= int(torch.cuda.device_count()):
+            raise RuntimeError(
+                f'RemoteCLIP device {requested!r} is not visible; '
+                f'visible CUDA device count={torch.cuda.device_count()}.')
+        device = torch.device(f'cuda:{index}')
+    return device
+
+
+def cuda_memory_snapshot(device):
+    device = torch.device(device)
+    if device.type != 'cuda' or not torch.cuda.is_available():
+        return dict(device=str(device), available=False)
+    scale = 1024.0 * 1024.0
+    return dict(
+        device=str(device),
+        available=True,
+        allocated_mb=float(torch.cuda.memory_allocated(device) / scale),
+        reserved_mb=float(torch.cuda.memory_reserved(device) / scale),
+        peak_allocated_mb=float(
+            torch.cuda.max_memory_allocated(device) / scale),
+        peak_reserved_mb=float(
+            torch.cuda.max_memory_reserved(device) / scale),
+    )
+
+
 def _ranked_jsonl_path(path):
     stem, suffix = os.path.splitext(path)
     return f'{stem}.rank{int(os.environ.get("RANK", 0))}{suffix or ".jsonl"}'
@@ -344,6 +401,7 @@ class RolePromptTTAMixin:
                 'weights/remoteclip/RemoteCLIP-ViT-L-14.pt'),
             role_prompt_tta_remoteclip_source_root='SCORE-main',
             role_prompt_tta_remoteclip_model='ViT-L-14',
+            role_prompt_tta_remoteclip_device='same',
             role_prompt_tta_primary_variant='full_regrounded_e2e',
             role_prompt_tta_anchor_mass=0.50,
             role_prompt_tta_visual_strength=1.0,
@@ -377,6 +435,8 @@ class RolePromptTTAMixin:
         self.role_prompt_tta_remoteclip_source_root = (
             role_prompt_tta_remoteclip_source_root)
         self.role_prompt_tta_remoteclip_model = role_prompt_tta_remoteclip_model
+        self.role_prompt_tta_remoteclip_device = str(
+            role_prompt_tta_remoteclip_device)
         self.role_prompt_tta_primary_variant = str(role_prompt_tta_primary_variant)
         self.role_prompt_tta_anchor_mass = float(role_prompt_tta_anchor_mass)
         self.role_prompt_tta_visual_strength = float(
@@ -437,7 +497,8 @@ class RolePromptTTAMixin:
                 source_root=os.path.abspath(
                     self.role_prompt_tta_remoteclip_source_root),
                 model_name=self.role_prompt_tta_remoteclip_model,
-                device=self.device,
+                device=resolve_remoteclip_device(
+                    self.role_prompt_tta_remoteclip_device, self.device),
             )
             self._rpt_remoteclip_descriptions = descriptions
             # SAM3 is frozen only for the enabled TTA experiment.  The official
@@ -628,6 +689,15 @@ class RolePromptTTAMixin:
         dense, global_feature = self._rpt_remoteclip.encode_image_dense(image)
         text = self._rpt_remoteclip.encode_text(
             self._rpt_remoteclip_descriptions)
+        # Only compact dense/text evidence crosses devices.  Keeping the
+        # frozen RemoteCLIP parameters on an auxiliary GPU removes them from
+        # the SAM3 E2E backward peak without changing any scores.
+        if dense.device != self.device:
+            dense = dense.to(self.device)
+        if text.device != self.device:
+            text = text.to(self.device)
+        if global_feature.device != self.device:
+            global_feature = global_feature.to(self.device)
         class_count = int(anchor_raw_class.shape[0])
         prompt_count = int(self._rpt_prompt_bank['_prompt_count'])
         text = text.view(class_count, prompt_count, -1)
@@ -695,6 +765,7 @@ class RolePromptTTAMixin:
             seed_entropy=seed_entropy,
             prototype_norms=prototype_norms,
             remoteclip_global_norm=float(global_feature.norm().item()),
+            remoteclip_device=str(self._rpt_remoteclip.device),
             anchor_entropy_mean=float(entropy.mean().item()),
             anchor_entropy_std=float(entropy.std(unbiased=False).item()),
             grid_shape=list(grid_shape),
@@ -775,13 +846,20 @@ class RolePromptTTAMixin:
         if self.role_prompt_tta_e2e_max_classes > 0:
             eligible = eligible[:self.role_prompt_tta_e2e_max_classes]
 
-        image_backbone = {
-            key: value
-            for key, value in state['backbone_out'].items()
-            if key not in ('language_features', 'language_mask', 'language_embeds')
-        }
-        image_backbone = _tensor_tree_grad_safe_clone(
-            image_backbone, self.device)
+        # set_image() creates inference-mode tensors which cannot be saved for
+        # backward. Replace those cached tensors in-place with ordinary clones
+        # so state and the E2E path share one copy instead of retaining both a
+        # full inference cache and a full grad-safe cache on the same GPU.
+        image_backbone = {}
+        for key in tuple(state['backbone_out']):
+            if key in ('language_features', 'language_mask', 'language_embeds'):
+                continue
+            cloned = _tensor_tree_grad_safe_clone(
+                state['backbone_out'][key], self.device)
+            state['backbone_out'][key] = cloned
+            image_backbone[key] = cloned
+        if self.device.type == 'cuda':
+            torch.cuda.empty_cache()
         refined = start_weights.detach().clone()
         trajectories = []
         updated_classes = []
@@ -799,6 +877,7 @@ class RolePromptTTAMixin:
             class_trace = []
             for step in range(self.role_prompt_tta_e2e_steps):
                 optimizer.zero_grad()
+                memory_before = cuda_memory_snapshot(self.device)
                 autocast = (
                     torch.autocast(device_type='cuda', dtype=torch.bfloat16)
                     if self.device.type == 'cuda'
@@ -852,7 +931,9 @@ class RolePromptTTAMixin:
                         )
                     ).sum()
                     loss = entropy_loss + self.role_prompt_tta_anchor_lambda * kl
+                memory_after_forward = cuda_memory_snapshot(self.device)
                 loss.backward()
+                memory_after_backward = cuda_memory_snapshot(self.device)
                 grad_norm = theta.grad.detach().float().norm()
                 optimizer.step()
                 class_trace.append(dict(
@@ -861,8 +942,18 @@ class RolePromptTTAMixin:
                     binary_entropy=float(entropy_loss.detach().item()),
                     anchor_kl=float(kl.detach().item()),
                     grad_norm=float(grad_norm.item()),
+                    cuda_memory=dict(
+                        before_forward=memory_before,
+                        after_forward=memory_after_forward,
+                        after_backward=memory_after_backward,
+                    ),
                 ))
-                del outputs, current, competitor, binary, entropy, loss
+                del (
+                    outputs, current, competitor, binary, entropy,
+                    entropy_loss, kl, loss, backbone, fused, fused_mask,
+                    weights, geometry, memory_before, memory_after_forward,
+                    memory_after_backward,
+                )
             with torch.no_grad():
                 refined[class_idx] = torch.softmax(
                     _safe_log(refined[class_idx], self.role_prompt_tta_eps)
@@ -911,6 +1002,13 @@ class RolePromptTTAMixin:
             view_id=None, crop_box=None):
         width, height = image.size
         output_shape = (height, width)
+        memory_devices = [self.device]
+        remoteclip_device = self._rpt_remoteclip.device
+        if remoteclip_device != self.device:
+            memory_devices.append(remoteclip_device)
+        for memory_device in memory_devices:
+            if memory_device.type == 'cuda':
+                torch.cuda.reset_peak_memory_stats(memory_device)
         state, cache, baseline, bank, candidate_stats = (
             self._rpt_collect_prompt_outputs(image))
         baseline_class = {
@@ -975,6 +1073,14 @@ class RolePromptTTAMixin:
             self.role_prompt_tta_class_balanced_entropy,
             self.role_prompt_tta_eps)
 
+        # Run the only activation-heavy gradient path before materializing the
+        # four no-grad re-grounded diagnostic maps. They are independent of
+        # E2E adaptation, so this reordering is numerically neutral and lowers
+        # the peak live tensor set during backward.
+        e2e_weights, e2e_trajectory, e2e_classes = (
+            self._rpt_e2e_refine_weights(
+                state, cache, full_weights,
+                baseline_class['semantic_raw'], visual))
         anchor_reground, anchor_fusion = self._rpt_reground_weights(
             state, cache, anchor_weights, output_shape)
         uniform_reground, uniform_fusion = self._rpt_reground_weights(
@@ -983,10 +1089,6 @@ class RolePromptTTAMixin:
             state, cache, visual_weights, output_shape)
         full_reground, full_fusion = self._rpt_reground_weights(
             state, cache, full_weights, output_shape)
-        e2e_weights, e2e_trajectory, e2e_classes = (
-            self._rpt_e2e_refine_weights(
-                state, cache, full_weights,
-                baseline_class['semantic_raw'], visual))
         e2e_reground, e2e_fusion = self._rpt_reground_weights(
             state, cache, e2e_weights, output_shape)
 
@@ -1124,6 +1226,7 @@ class RolePromptTTAMixin:
             seed_gate=[float(value) for value in visual['seed_gate'].cpu().tolist()],
             visual_affinity=visual['affinity'].detach().float().cpu().tolist(),
             remoteclip_grid_shape=visual['grid_shape'],
+            remoteclip_device=visual['remoteclip_device'],
             seed_indices=[
                 torch.nonzero(mask.flatten(), as_tuple=False)
                 .flatten().detach().cpu().tolist()
@@ -1148,6 +1251,10 @@ class RolePromptTTAMixin:
                 e2e=e2e_fusion,
             ),
             head_change=head_change,
+            cuda_memory=dict(
+                main=cuda_memory_snapshot(self.device),
+                remoteclip=cuda_memory_snapshot(remoteclip_device),
+            ),
         )
         components = dict(
             semantic_logits=semantic_query,
@@ -1284,6 +1391,7 @@ class RolePromptTTAMixin:
             prompt_bank=os.path.abspath(self.role_prompt_tta_prompt_bank),
             prompt_count=int(self._rpt_prompt_bank['_prompt_count']),
             settings=dict(
+                remoteclip_device=str(self._rpt_remoteclip.device),
                 anchor_mass=self.role_prompt_tta_anchor_mass,
                 visual_strength=self.role_prompt_tta_visual_strength,
                 presence_threshold=self.role_prompt_tta_presence_threshold,

@@ -105,9 +105,15 @@ Presence 用于限制是否允许调整，RemoteCLIP 只在其自身视觉—文
 - Presence gate、RemoteCLIP 类内 affinity、原型范数；
 - anchor/visual/full/e2e 权重、winner、最大权重、effective prompt count；
 - surrogate 与 e2e 每步 loss、KL、entropy、gradient norm；
+- SAM3 主设备与 RemoteCLIP 设备、E2E 前向/反向峰值显存；
 - semantic/instance/Presence/final 相对 baseline 的变化；
 - 融合语言相对字面类别锚点的残差范数；
 - 少量降采样预测 NPZ，便于定位典型成功/失败图像。
+
+汇总后的 `summary/mechanism.csv` 会直接包含
+`cuda_main_peak_allocated_mb`、`cuda_remoteclip_peak_allocated_mb` 以及
+`e2e_cuda_{before_forward,after_forward,after_backward}_peak_allocated_mb`，
+用于区分冻结模型常驻开销、前向激活和反向峰值。
 
 汇总生成：
 
@@ -139,12 +145,13 @@ cd /home/PengJunhao/workspace/SegEarth-OV-3
 python tools/preflight_role_prompt_tta.py --check-runtime-assets
 ```
 
-单卡单图 smoke（会真实执行 1 个 e2e 类，主要用于发现接口/显存错误）：
+双卡模型分置的单图 smoke：SAM3 使用可见设备 `cuda:0`，RemoteCLIP 使用
+`cuda:1`。它会真实执行 1 个 e2e 类，主要用于验证梯度和峰值显存：
 
 ```bash
 cd /home/PengJunhao/workspace/SegEarth-OV-3
-ROOT=logs/role_prompt_tta_smoke \
-GPU_LIST=0 NPROC=1 SMOKE_SAMPLES=1 \
+ROOT=logs/role_prompt_tta_smoke_aux \
+GPU_LIST=0,1 NPROC=1 REMOTECLIP_DEVICE=aux SMOKE_SAMPLES=1 \
 bash tools/run_role_prompt_tta_v1.sh smoke
 ```
 
@@ -152,8 +159,8 @@ bash tools/run_role_prompt_tta_v1.sh smoke
 
 ```bash
 cd /home/PengJunhao/workspace/SegEarth-OV-3
-ROOT=logs/role_prompt_tta_v1 \
-GPU_LIST=0,1 NPROC=2 \
+ROOT=logs/role_prompt_tta_v1_aux \
+GPU_LIST=0,1,2,3 NPROC=2 REMOTECLIP_DEVICE=aux \
 E2E_STEPS=1 E2E_MAX_CLASSES=4 \
 bash tools/run_role_prompt_tta_v1.sh all
 ```
@@ -166,5 +173,12 @@ ROOT=logs/role_prompt_tta_v1 \
 bash tools/run_role_prompt_tta_v1.sh summarize
 ```
 
-若显存不足，首先保持算法不变，只把 `E2E_MAX_CLASSES=4` 调成 `2`；不要先改
-损失或提示池。新的 `ROOT` 必须为空，脚本会拒绝向旧 JSONL 追加重复样本。
+这里不能使用 `NPROC=4` 来降低单卡显存：常规 DDP 会在四张卡上各复制一套
+SAM3 与 RemoteCLIP。`REMOTECLIP_DEVICE=aux` 使用的是两条评测 rank 加两张
+RemoteCLIP 辅助卡，即 rank 0/1 的 SAM3 位于 `cuda:0/1`，各自 RemoteCLIP 位于
+`cuda:2/3`。算法输出不变，只改变冻结模型的设备位置。
+
+`E2E_MAX_CLASSES` 只减少逐类反向的次数和总运行时间，不能降低单个类别反向的
+峰值显存。若辅助卡分置后仍不足，可先用 `E2E_STEPS=0` 完成所有非 E2E 变体，
+但这会使 `full_regrounded_e2e` 退化为 surrogate 权重，必须作为降级诊断运行而
+不能冒充完整主方法。新的 `ROOT` 必须为空，脚本会拒绝向旧 JSONL 追加重复样本。

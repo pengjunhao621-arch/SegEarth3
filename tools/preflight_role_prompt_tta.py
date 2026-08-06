@@ -84,6 +84,8 @@ def static_checks():
     for path in (segmentor, processor, role_module, definitions):
         compile(read(path), path, 'exec')
     assert constructor_default(segmentor, 'use_role_prompt_tta') is False
+    assert constructor_default(
+        segmentor, 'role_prompt_tta_remoteclip_device') == 'same'
     segmentor_text = read(segmentor)
     assert 'or self._uses_role_prompt_tta()' in segmentor_text
     assert 'role_prompt_variant_query_logits' in segmentor_text
@@ -95,12 +97,18 @@ def static_checks():
             'full_no_anchor_output', 'full_no_presence_gate_output',
             'anchor_output', 'anchor_regrounded',
             'full_regrounded_surrogate', 'full_regrounded_e2e',
-            'torch.enable_grad()', 'seed_gt_diagnostics'):
+            'torch.enable_grad()', 'seed_gt_diagnostics',
+            'resolve_remoteclip_device', 'cuda_memory_snapshot'):
         assert required in role_text
+    runner_text = read(os.path.join(
+        ROOT, 'tools', 'run_role_prompt_tta_v1.sh'))
+    assert 'REMOTECLIP_DEVICE' in runner_text
+    assert 'PYTORCH_CUDA_ALLOC_CONF' in runner_text
     report['checks'].extend([
         'all prompt banks match protected primary class order',
         'all experiment configs exclude iSAID',
         'new method is constructor-default-off',
+        'RemoteCLIP defaults to the main device unless explicitly offloaded',
         'sliding aggregation and exact per-image recorder are connected',
         'raw semantic logits are exposed without changing predictions',
         'surrogate/e2e/anchor/presence diagnostic controls are present',
@@ -140,6 +148,8 @@ def runtime_checks(report):
     del remoteclip
     gc.collect()
     weights = role.initial_prompt_weights(3, 5, 0.5, torch.device('cpu'))
+    assert role.resolve_remoteclip_device(
+        'same', torch.device('cpu')) == torch.device('cpu')
     assert torch.allclose(weights.sum(dim=1), torch.ones(3))
     raw = torch.randn(3, 5, 8, 8)
     affinity = torch.randn(3, 5)

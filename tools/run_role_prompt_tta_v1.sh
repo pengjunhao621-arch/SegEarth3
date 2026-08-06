@@ -11,7 +11,25 @@ SMOKE_SAMPLES="${SMOKE_SAMPLES:-1}"
 PRIMARY_VARIANT="${PRIMARY_VARIANT:-full_regrounded_e2e}"
 E2E_STEPS="${E2E_STEPS:-1}"
 E2E_MAX_CLASSES="${E2E_MAX_CLASSES:-4}"
+REMOTECLIP_DEVICE="${REMOTECLIP_DEVICE:-same}"
 SAVE_NPZ="${SAVE_NPZ:-True}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:128}"
+
+validate_device_layout() {
+    if [[ "${REMOTECLIP_DEVICE}" != "aux" ]]; then
+        return
+    fi
+    local visible_gpus required
+    IFS=',' read -r -a visible_gpus <<< "${GPU_LIST}"
+    required=$((2 * NPROC))
+    if [[ "${#visible_gpus[@]}" -lt "${required}" ]]; then
+        echo "REMOTECLIP_DEVICE=aux requires at least ${required} visible GPUs" >&2
+        echo "for NPROC=${NPROC}; got GPU_LIST=${GPU_LIST}." >&2
+        echo "Use two ranks with four GPUs, not four ranks: " >&2
+        echo "GPU_LIST=0,1,2,3 NPROC=2 REMOTECLIP_DEVICE=aux" >&2
+        exit 2
+    fi
+}
 
 config_for() {
     case "$1" in
@@ -61,6 +79,7 @@ run_eval() {
 collect() {
     local collection_mode="$1"
     local dataset config out_dir existing
+    validate_device_layout
     "${PYTHON_BIN}" tools/preflight_role_prompt_tta.py \
         --check-runtime-assets
     for dataset in $(datasets_for_mode "${collection_mode}"); do
@@ -81,6 +100,7 @@ collect() {
             model.role_prompt_tta_primary_variant="${PRIMARY_VARIANT}"
             model.role_prompt_tta_e2e_steps="${E2E_STEPS}"
             model.role_prompt_tta_e2e_max_classes="${E2E_MAX_CLASSES}"
+            model.role_prompt_tta_remoteclip_device="${REMOTECLIP_DEVICE}"
             model.role_prompt_tta_save_npz="${SAVE_NPZ}"
         )
         if [[ "${collection_mode}" == "smoke" ]]; then

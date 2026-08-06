@@ -27,6 +27,24 @@ class RolePromptTTAStaticTest(unittest.TestCase):
         self.assertIn('with torch.enable_grad():', function_source)
         self.assertIn('loss.backward()', function_source)
 
+    def test_e2e_memory_controls_are_wired(self):
+        role_path = os.path.join(ROOT, 'role_prompt_tta.py')
+        with open(role_path, encoding='utf-8') as handle:
+            role_source = handle.read()
+        self.assertIn('def resolve_remoteclip_device(', role_source)
+        self.assertIn("requested == 'aux'", role_source)
+        self.assertIn('state[\'backbone_out\'][key] = cloned', role_source)
+        e2e_call = role_source.index(
+            'e2e_weights, e2e_trajectory, e2e_classes')
+        diagnostic_reground = role_source.index(
+            'anchor_reground, anchor_fusion', e2e_call)
+        self.assertLess(e2e_call, diagnostic_reground)
+        runner_path = os.path.join(ROOT, 'tools', 'run_role_prompt_tta_v1.sh')
+        with open(runner_path, encoding='utf-8') as handle:
+            runner_source = handle.read()
+        self.assertIn('REMOTECLIP_DEVICE', runner_source)
+        self.assertIn('PYTORCH_CUDA_ALLOC_CONF', runner_source)
+
     def test_preflight_without_server_dependencies(self):
         result = subprocess.run(
             [sys.executable, 'tools/preflight_role_prompt_tta.py'],
@@ -85,6 +103,35 @@ class RolePromptTTAStaticTest(unittest.TestCase):
                     'visual_affinity': [[0.1] * 5, [0.0] * 5],
                     'anchor_entropy_mean': 0.2,
                     'remoteclip_global_norm': 1.0,
+                    'cuda_memory': {
+                        'main': {
+                            'allocated_mb': 100.0,
+                            'reserved_mb': 120.0,
+                            'peak_allocated_mb': 200.0,
+                            'peak_reserved_mb': 220.0,
+                        },
+                        'remoteclip': {
+                            'allocated_mb': 50.0,
+                            'reserved_mb': 60.0,
+                            'peak_allocated_mb': 70.0,
+                            'peak_reserved_mb': 80.0,
+                        },
+                    },
+                    'e2e_trajectory': [{
+                        'class_index': 0,
+                        'steps': [{
+                            'loss': 0.3,
+                            'grad_norm': 0.2,
+                            'cuda_memory': {
+                                'before_forward': {
+                                    'peak_allocated_mb': 150.0},
+                                'after_forward': {
+                                    'peak_allocated_mb': 180.0},
+                                'after_backward': {
+                                    'peak_allocated_mb': 200.0},
+                            },
+                        }],
+                    }],
                     'candidate_stats': [[], []],
                     'weight_stats': [],
                     'head_change': [],
@@ -114,6 +161,12 @@ class RolePromptTTAStaticTest(unittest.TestCase):
                 summary['datasets'][0]['primary_delta'], 0.0)
             self.assertTrue(os.path.isfile(
                 os.path.join(out_dir, 'component_attribution.csv')))
+            mechanism = summary['datasets'][0]['mechanism_row']
+            self.assertEqual(
+                mechanism['cuda_main_peak_allocated_mb'], 200.0)
+            self.assertEqual(
+                mechanism['e2e_cuda_after_backward_peak_allocated_mb'],
+                200.0)
 
 
 if __name__ == '__main__':
