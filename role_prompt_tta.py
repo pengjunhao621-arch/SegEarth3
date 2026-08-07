@@ -43,6 +43,13 @@ from head_role_prompt_conflict_definitions import (
     VARIANT_NAMES as HEAD_ROLE_VARIANT_NAMES,
     variant_name as head_role_variant_name,
 )
+from semantic_supplement_definitions import (
+    PROTOCOL as SEMANTIC_SUPPLEMENT_PROTOCOL,
+    SCHEMA_VERSION as SEMANTIC_SUPPLEMENT_SCHEMA_VERSION,
+    VARIANT_NAMES as SEMANTIC_SUPPLEMENT_VARIANT_NAMES,
+    load_semantic_supplement_bank,
+)
+from semantic_supplement_screen import SemanticSupplementScreenMixin
 
 # Backward-compatible export used by existing configs/tests/summarization.
 VARIANT_NAMES = V1_VARIANT_NAMES
@@ -409,7 +416,7 @@ class RemoteCLIPRuntime:
         return dense.detach(), global_feature.detach()
 
 
-class RolePromptTTAMixin:
+class RolePromptTTAMixin(SemanticSupplementScreenMixin):
     """Mixin integrated by :class:`SegEarthOV3Segmentation`."""
 
     def _rpt_initialize(
@@ -447,7 +454,9 @@ class RolePromptTTAMixin:
             role_prompt_tta_integrity_tolerance=1e-5,
             role_prompt_tta_save_npz=True,
             role_prompt_tta_artifact_max_side=128,
-            role_prompt_tta_max_saved_images=8):
+            role_prompt_tta_max_saved_images=8,
+            role_prompt_tta_semantic_residual_alpha=0.50,
+            role_prompt_tta_semantic_residual_clip=0.25):
         self.use_role_prompt_tta = bool(use_role_prompt_tta)
         self.dump_role_prompt_tta_stats = bool(dump_role_prompt_tta_stats)
         self.role_prompt_tta_protocol = str(role_prompt_tta_protocol)
@@ -497,6 +506,10 @@ class RolePromptTTAMixin:
             role_prompt_tta_artifact_max_side)
         self.role_prompt_tta_max_saved_images = int(
             role_prompt_tta_max_saved_images)
+        self.role_prompt_tta_semantic_residual_alpha = float(
+            role_prompt_tta_semantic_residual_alpha)
+        self.role_prompt_tta_semantic_residual_clip = float(
+            role_prompt_tta_semantic_residual_clip)
         self._role_prompt_tta_stats_file = None
         self._role_prompt_tta_saved_images = 0
         self._rpt_text_cache = None
@@ -506,7 +519,8 @@ class RolePromptTTAMixin:
 
         if self.role_prompt_tta_protocol not in (
                 'v1', 'prompt_functional_atlas_v2',
-                'head_role_prompt_conflict_v1'):
+                'head_role_prompt_conflict_v1',
+                SEMANTIC_SUPPLEMENT_PROTOCOL):
             raise ValueError(
                 f'Unknown role_prompt_tta_protocol='
                 f'{self.role_prompt_tta_protocol!r}.')
@@ -515,17 +529,28 @@ class RolePromptTTAMixin:
                 f'Unknown role_prompt_tta_primary_variant='
                 f'{self.role_prompt_tta_primary_variant!r}.')
         if (
-                self.role_prompt_tta_protocol
-                == 'head_role_prompt_conflict_v1'
+                self.role_prompt_tta_protocol in (
+                    'head_role_prompt_conflict_v1',
+                    SEMANTIC_SUPPLEMENT_PROTOCOL)
                 and self.role_prompt_tta_primary_variant != 'baseline'):
             raise ValueError(
-                'Head-role prompt conflict v1 is diagnostic-only and must '
+                'Prompt screening protocols are diagnostic-only and must '
                 'return the protected baseline as its primary prediction.')
+        if not (0.0 <= self.role_prompt_tta_semantic_residual_alpha <= 1.0):
+            raise ValueError(
+                'role_prompt_tta_semantic_residual_alpha must be in [0, 1].')
+        if not (0.0 < self.role_prompt_tta_semantic_residual_clip <= 1.0):
+            raise ValueError(
+                'role_prompt_tta_semantic_residual_clip must be in (0, 1].')
         if self._uses_role_prompt_tta():
             if not role_prompt_tta_prompt_bank:
                 raise ValueError('role_prompt_tta_prompt_bank is required.')
-            self._rpt_prompt_bank = load_prompt_bank(
-                role_prompt_tta_prompt_bank, self.class_names)
+            if self.role_prompt_tta_protocol == SEMANTIC_SUPPLEMENT_PROTOCOL:
+                self._rpt_prompt_bank = load_semantic_supplement_bank(
+                    role_prompt_tta_prompt_bank, self.class_names)
+            else:
+                self._rpt_prompt_bank = load_prompt_bank(
+                    role_prompt_tta_prompt_bank, self.class_names)
             if (
                     self.role_prompt_tta_protocol
                     == 'prompt_functional_atlas_v2'
@@ -547,7 +572,9 @@ class RolePromptTTAMixin:
                 for item in self._rpt_prompt_bank['classes']
                 for description in item['descriptions']
             ]
-            if self.role_prompt_tta_protocol == 'head_role_prompt_conflict_v1':
+            if self.role_prompt_tta_protocol in (
+                    'head_role_prompt_conflict_v1',
+                    SEMANTIC_SUPPLEMENT_PROTOCOL):
                 # This audit is native-SAM3 only.  Avoid loading RemoteCLIP or
                 # constructing any test-time optimization graph.
                 self._rpt_remoteclip = None
@@ -576,7 +603,16 @@ class RolePromptTTAMixin:
             getattr(self, 'use_role_prompt_tta', False)
             or getattr(self, 'dump_role_prompt_tta_stats', False))
 
+    def _rpt_uses_class_space_variants(self):
+        return getattr(self, 'role_prompt_tta_protocol', 'v1') in (
+            'head_role_prompt_conflict_v1',
+            SEMANTIC_SUPPLEMENT_PROTOCOL,
+        )
+
     def _rpt_variant_names(self):
+        if getattr(self, 'role_prompt_tta_protocol', 'v1') \
+                == SEMANTIC_SUPPLEMENT_PROTOCOL:
+            return SEMANTIC_SUPPLEMENT_VARIANT_NAMES
         if getattr(self, 'role_prompt_tta_protocol', 'v1') \
                 == 'head_role_prompt_conflict_v1':
             return HEAD_ROLE_VARIANT_NAMES
@@ -586,6 +622,9 @@ class RolePromptTTAMixin:
         return V1_VARIANT_NAMES
 
     def _rpt_record_schema_version(self):
+        if getattr(self, 'role_prompt_tta_protocol', 'v1') \
+                == SEMANTIC_SUPPLEMENT_PROTOCOL:
+            return SEMANTIC_SUPPLEMENT_SCHEMA_VERSION
         if getattr(self, 'role_prompt_tta_protocol', 'v1') \
                 == 'head_role_prompt_conflict_v1':
             return HEAD_ROLE_SCHEMA_VERSION
@@ -625,8 +664,9 @@ class RolePromptTTAMixin:
         # numerical behavior. Other protocols retain their original cache.
         prompts_to_encode_individually = (
             all_prompts
-            if self.role_prompt_tta_protocol
-            == 'head_role_prompt_conflict_v1'
+            if self.role_prompt_tta_protocol in (
+                'head_role_prompt_conflict_v1',
+                SEMANTIC_SUPPLEMENT_PROTOCOL)
             else self.query_words)
         with torch.no_grad(), self._rpt_autocast_context():
             for prompt in prompts_to_encode_individually:
@@ -1924,6 +1964,14 @@ class RolePromptTTAMixin:
     def _rpt_infer_single_view(
             self, image, return_stats=False, return_components=False,
             view_id=None, crop_box=None):
+        if self.role_prompt_tta_protocol == SEMANTIC_SUPPLEMENT_PROTOCOL:
+            return self._rpt_semantic_supplement_infer_single_view(
+                image,
+                return_stats=return_stats,
+                return_components=return_components,
+                view_id=view_id,
+                crop_box=crop_box,
+            )
         if self.role_prompt_tta_protocol == 'head_role_prompt_conflict_v1':
             return self._rpt_head_role_infer_single_view(
                 image,
@@ -2295,8 +2343,9 @@ class RolePromptTTAMixin:
         if not valid.any():
             return
         compact_predictions = (
-            self.role_prompt_tta_protocol
-            == 'head_role_prompt_conflict_v1')
+            self.role_prompt_tta_protocol in (
+                'head_role_prompt_conflict_v1',
+                SEMANTIC_SUPPLEMENT_PROTOCOL))
         predictions = {
             name: (
                 self._rpt_threshold(logits.detach().float().cpu())
@@ -2358,6 +2407,10 @@ class RolePromptTTAMixin:
                 anchor_lambda=self.role_prompt_tta_anchor_lambda,
                 delta_max=self.role_prompt_tta_delta_max,
                 class_balanced_entropy=self.role_prompt_tta_class_balanced_entropy,
+                semantic_residual_alpha=(
+                    self.role_prompt_tta_semantic_residual_alpha),
+                semantic_residual_clip=(
+                    self.role_prompt_tta_semantic_residual_clip),
                 e2e_steps=self.role_prompt_tta_e2e_steps,
                 e2e_lr=self.role_prompt_tta_e2e_lr,
                 e2e_max_classes=self.role_prompt_tta_e2e_max_classes,
@@ -2367,8 +2420,9 @@ class RolePromptTTAMixin:
             variants=variant_stats,
             views=(
                 [dict(view) for view in view_stats]
-                if self.role_prompt_tta_protocol
-                == 'head_role_prompt_conflict_v1'
+                if self.role_prompt_tta_protocol in (
+                    'head_role_prompt_conflict_v1',
+                    SEMANTIC_SUPPLEMENT_PROTOCOL)
                 else self._rpt_enrich_seed_stats_with_gt(
                     view_stats, gt_data)),
         )

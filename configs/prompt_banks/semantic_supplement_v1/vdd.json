@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "protocol": "semantic_supplement_screen_v1",
+  "dataset": "VDD",
+  "generator": "Codex; frozen constrained candidates generated before evaluation",
+  "frozen_before_evaluation": true,
+  "lexical_policy": "Class-boundary-preserving aliases, spelling variants, and number variants only; no attributes, parts, subtypes, supertypes, scenes, or actions.",
+  "modifier_policy": "One controlled overhead visual modifier while retaining the literal anchor phrase.",
+  "classes": [
+    {"id": 0, "name": "background", "anchor": "background", "lexical_equivalents": ["backgrounds", "image background"], "semantic_modifiers": ["unlabeled background", "mixed background region", "miscellaneous background"]},
+    {"id": 1, "name": "facade", "anchor": "facade", "lexical_equivalents": ["facades", "façade", "façades"], "semantic_modifiers": ["vertical facade", "planar facade surface", "rectilinear facade region"]},
+    {"id": 2, "name": "road", "anchor": "road", "lexical_equivalents": ["roads", "roadway", "roadways"], "semantic_modifiers": ["elongated road surface", "continuous road surface", "paved road surface"]},
+    {"id": 3, "name": "vegetation", "anchor": "vegetation", "lexical_equivalents": ["plant cover", "greenery", "vegetative cover"], "semantic_modifiers": ["textured vegetation", "dense vegetation", "irregular vegetation cover"]},
+    {"id": 4, "name": "vehicle", "anchor": "vehicle", "lexical_equivalents": ["vehicles"], "semantic_modifiers": ["compact vehicle", "small vehicle", "rectangular vehicle roof"]},
+    {"id": 5, "name": "roof", "anchor": "roof", "lexical_equivalents": ["roofs", "rooftop", "rooftops"], "semantic_modifiers": ["polygonal roof", "planar roof surface", "textured roof surface"]},
+    {"id": 6, "name": "water", "anchor": "water", "lexical_equivalents": ["waters", "water body", "water bodies"], "semantic_modifiers": ["smooth water surface", "reflective water surface", "contiguous water region"]}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "protocol": "semantic_supplement_screen_v1",
+  "dataset": "UDD5",
+  "generator": "Codex; frozen constrained candidates generated before evaluation",
+  "frozen_before_evaluation": true,
+  "lexical_policy": "Class-boundary-preserving aliases, spelling variants, and number variants only; no attributes, parts, subtypes, supertypes, scenes, or actions.",
+  "modifier_policy": "One controlled overhead visual modifier while retaining the literal anchor phrase.",
+  "classes": [
+    {"id": 0, "name": "vegetation", "anchor": "vegetation", "lexical_equivalents": ["plant cover", "greenery", "vegetative cover"], "semantic_modifiers": ["textured vegetation", "dense vegetation", "irregular vegetation cover"]},
+    {"id": 1, "name": "building", "anchor": "building", "lexical_equivalents": ["buildings"], "semantic_modifiers": ["polygonal building footprint", "rectilinear building", "overhead building roof"]},
+    {"id": 2, "name": "road", "anchor": "road", "lexical_equivalents": ["roads", "roadway", "roadways"], "semantic_modifiers": ["elongated road surface", "continuous road surface", "paved road surface"]},
+    {"id": 3, "name": "vehicle", "anchor": "vehicle", "lexical_equivalents": ["vehicles"], "semantic_modifiers": ["compact vehicle", "small vehicle", "rectangular vehicle roof"]},
+    {"id": 4, "name": "background", "anchor": "background", "lexical_equivalents": ["backgrounds", "image background"], "semantic_modifiers": ["unlabeled background", "mixed background region", "miscellaneous background"]}
+  ]
+}

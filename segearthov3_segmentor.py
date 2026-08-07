@@ -727,6 +727,8 @@ class SegEarthOV3Segmentation(
                  role_prompt_tta_save_npz=True,
                  role_prompt_tta_artifact_max_side=128,
                  role_prompt_tta_max_saved_images=8,
+                 role_prompt_tta_semantic_residual_alpha=0.50,
+                 role_prompt_tta_semantic_residual_clip=0.25,
                  **kwargs):
         super().__init__()
 
@@ -1740,6 +1742,10 @@ class SegEarthOV3Segmentation(
                 role_prompt_tta_artifact_max_side),
             role_prompt_tta_max_saved_images=(
                 role_prompt_tta_max_saved_images),
+            role_prompt_tta_semantic_residual_alpha=(
+                role_prompt_tta_semantic_residual_alpha),
+            role_prompt_tta_semantic_residual_clip=(
+                role_prompt_tta_semantic_residual_clip),
         )
         if self.instance_score_type not in ('presence', 'raw'):
             raise ValueError(
@@ -2597,8 +2603,7 @@ class SegEarthOV3Segmentation(
             else None)
         role_prompt_class_space = bool(
             self._uses_role_prompt_tta()
-            and self.role_prompt_tta_protocol
-            == 'head_role_prompt_conflict_v1')
+            and self._rpt_uses_class_space_variants())
         role_prompt_tta_preds = (
             {
                 name: torch.zeros(
