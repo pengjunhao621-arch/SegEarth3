@@ -1,4 +1,5 @@
 import ast
+import copy
 import json
 import os
 import subprocess
@@ -75,6 +76,8 @@ class HeadRolePromptConflictStaticTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             input_path = os.path.join(
                 directory, 'head_role_conflict.rank0.jsonl')
+            duplicate_path = os.path.join(
+                directory, 'head_role_conflict.rank1.jsonl')
             out_dir = os.path.join(directory, 'summary')
             variants = {}
             for name in VARIANT_NAMES:
@@ -145,10 +148,14 @@ class HeadRolePromptConflictStaticTest(unittest.TestCase):
             )
             with open(input_path, 'w', encoding='utf-8') as handle:
                 handle.write(json.dumps(record) + '\n')
+            duplicate = copy.deepcopy(record)
+            duplicate['rank'] = 1
+            with open(duplicate_path, 'w', encoding='utf-8') as handle:
+                handle.write(json.dumps(duplicate) + '\n')
             result = subprocess.run(
                 [sys.executable,
                  'tools/summarize_head_role_prompt_conflict.py',
-                 '--inputs', input_path,
+                 '--inputs', input_path, duplicate_path,
                  '--out-dir', out_dir,
                  '--expected-datasets', 'udd5',
                  '--allow-incomplete'],
@@ -159,6 +166,12 @@ class HeadRolePromptConflictStaticTest(unittest.TestCase):
                 summary = json.load(handle)
             self.assertTrue(summary['all_integrity_passed'])
             self.assertEqual(
+                summary['distributed_padding_duplicates_removed'],
+                {'udd5': 1})
+            self.assertTrue(all(
+                row['images'] == 1
+                for row in summary['datasets'][0]['variant_rows']))
+            self.assertEqual(
                 summary['conflict_counts'][
                     'datasets_with_semantic_positive_native_nonpositive'], 1)
             for name in (
@@ -167,6 +180,35 @@ class HeadRolePromptConflictStaticTest(unittest.TestCase):
                     'head_response.csv', 'integrity.csv',
                     'cross_dataset_variants.csv', 'decision_report.md'):
                 self.assertTrue(os.path.isfile(os.path.join(out_dir, name)))
+
+            duplicate['variants']['baseline']['changed_pixels'] = 1
+            with open(duplicate_path, 'w', encoding='utf-8') as handle:
+                handle.write(json.dumps(duplicate) + '\n')
+            inconsistent = subprocess.run(
+                [sys.executable,
+                 'tools/summarize_head_role_prompt_conflict.py',
+                 '--inputs', input_path, duplicate_path,
+                 '--out-dir', os.path.join(directory, 'inconsistent'),
+                 '--expected-datasets', 'udd5',
+                 '--allow-incomplete'],
+                cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertNotEqual(inconsistent.returncode, 0)
+            self.assertIn(
+                'inconsistent exact fields', inconsistent.stderr)
+
+            duplicate['rank'] = 0
+            with open(duplicate_path, 'w', encoding='utf-8') as handle:
+                handle.write(json.dumps(duplicate) + '\n')
+            same_rank = subprocess.run(
+                [sys.executable,
+                 'tools/summarize_head_role_prompt_conflict.py',
+                 '--inputs', input_path, duplicate_path,
+                 '--out-dir', os.path.join(directory, 'same_rank'),
+                 '--expected-datasets', 'udd5',
+                 '--allow-incomplete'],
+                cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertNotEqual(same_rank.returncode, 0)
+            self.assertIn('same rank', same_rank.stderr)
 
 
 if __name__ == '__main__':

@@ -109,7 +109,8 @@ def load_records(paths, expected_datasets, allow_incomplete):
     if any(name == 'isaid' for name in expected):
         raise ValueError('iSAID is excluded from project evaluation.')
     records = []
-    seen = set()
+    seen = {}
+    duplicate_counts = defaultdict(int)
     for path in paths:
         with open(path, encoding='utf-8') as handle:
             for line_number, line in enumerate(handle, 1):
@@ -128,9 +129,31 @@ def load_records(paths, expected_datasets, allow_incomplete):
                     raise ValueError(
                         f'Variant contract mismatch at {path}:{line_number}.')
                 key = (dataset, str(record.get('img_path')))
-                if key in seen:
-                    raise ValueError(f'Duplicate image record: {key}.')
-                seen.add(key)
+                rank = int(record.get('rank', 0))
+                prior_by_rank = seen.get(key)
+                if prior_by_rank is not None:
+                    if rank in prior_by_rank:
+                        raise ValueError(
+                            'Duplicate image record from the same rank; use '
+                            f'a fresh ROOT before rerunning: {key}.')
+                    prior = next(iter(prior_by_rank.values()))
+                    exact_fields = (
+                        'class_names', 'valid_pixels', 'prob_thd',
+                        'confidence_threshold', 'primary_variant',
+                        'prompt_count', 'settings', 'variants',
+                    )
+                    inconsistent = [
+                        name for name in exact_fields
+                        if prior.get(name) != record.get(name)
+                    ]
+                    if inconsistent:
+                        raise ValueError(
+                            'Cross-rank padding duplicate has inconsistent '
+                            f'exact fields {inconsistent}: {key}.')
+                    prior_by_rank[rank] = record
+                    duplicate_counts[dataset] += 1
+                    continue
+                seen[key] = {rank: record}
                 records.append(record)
     if not records:
         raise ValueError('No head-role prompt-conflict records were found.')
@@ -138,7 +161,7 @@ def load_records(paths, expected_datasets, allow_incomplete):
     missing = [name for name in expected if name not in observed]
     if missing and not allow_incomplete:
         raise ValueError(f'Missing expected datasets: {missing}.')
-    return records, missing
+    return records, missing, dict(duplicate_counts)
 
 
 def summarize_dataset(dataset, records, tolerance):
@@ -390,7 +413,7 @@ def cross_dataset_rows(dataset_summaries):
 def main():
     args = parse_args()
     paths = expand_inputs(args.inputs)
-    records, missing = load_records(
+    records, missing, duplicate_counts = load_records(
         paths, args.expected_datasets, args.allow_incomplete)
     grouped = defaultdict(list)
     for record in records:
@@ -446,6 +469,7 @@ def main():
         schema_version=SCHEMA_VERSION,
         source_files=paths,
         missing_datasets=missing,
+        distributed_padding_duplicates_removed=duplicate_counts,
         datasets=summaries,
         cross_dataset_variants=cross_rows,
         best_fixed_candidate=best_fixed,
@@ -461,6 +485,9 @@ def main():
         handle.write(
             f'- Datasets present: `{", ".join(grouped)}`; missing: '
             f'`{", ".join(missing) if missing else "none"}`.\n')
+        handle.write(
+            '- DDP sampler padding duplicates removed after exact-field '
+            f'validation: `{json.dumps(duplicate_counts, sort_keys=True)}`.\n')
         handle.write(
             f'- Exact implementation controls passed: '
             f'`{payload["all_integrity_passed"]}`.\n')
@@ -498,6 +525,7 @@ def main():
         out_dir=os.path.abspath(args.out_dir),
         datasets=list(grouped),
         missing=missing,
+        distributed_padding_duplicates_removed=duplicate_counts,
         all_integrity_passed=payload['all_integrity_passed'],
         best_fixed_candidate=best_fixed,
         conflict_counts=conflict_counts,
