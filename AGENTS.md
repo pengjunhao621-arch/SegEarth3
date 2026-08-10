@@ -119,17 +119,21 @@ Do not make invasive changes to the official implementation.
 When implementation is requested:
 
 * preserve the original baseline behavior;
-* do not overwrite official model classes unless explicitly instructed;
+* direct, minimal edits to existing model classes are allowed when they avoid
+  duplicating an execution path; Git history is the rollback mechanism;
 * do not silently change default config values;
 * do not modify original experiment scripts in a way that changes baseline results;
-* prefer adding new config files, new optional modules, and new experiment entry points;
+* prefer reusing or simplifying an existing implementation over adding another
+  parallel module, wrapper, diagnostic framework, or experiment entry point;
 * make every new method switchable through configuration;
 * ensure the original baseline can still be run with the original command.
 
 Preferred implementation style:
 
-* add new method variants as optional modules;
-* add new YAML/JSON/Python config files for new experiments;
+* modify the closest existing implementation directly when the change is small
+  and conceptually belongs there;
+* add a new module or config only when it represents a genuinely distinct,
+  reusable path rather than a short-lived variation;
 * use flags such as `method`, `variant`, `use_xxx`, or `loss_type` where appropriate;
 * keep baseline configs unchanged;
 * create new scripts only when configuration alone is insufficient;
@@ -608,7 +612,8 @@ Never sacrifice research honesty for a more impressive-looking answer.
 
 本项目使用“本机 Codex → GitHub 私有仓库 → 远程服务器”的代码同步流程。除非用户明确改变授权范围，长期遵守以下规则：
 
-1. 每次完成一项用户要求的实验代码修改后，先运行相关测试或最低限度验证。
+1. 每次完成一项用户要求的实验代码修改后，只运行与风险相称的最低限度验证；
+   小型文档、配置或局部修正不运行全量测试。
 2. 提交前必须检查 `git status` 和实际 diff。
 3. 只暂存本次任务相关的源代码、配置和必要文件。
 4. 不得提交本地文档、数据集、权重、checkpoint、实验输出、日志、缓存、虚拟环境和敏感信息。
@@ -633,12 +638,11 @@ Never sacrifice research honesty for a more impressive-looking answer.
    `bash tools/maintain_gitnexus.sh refresh`。
 3. 优先使用 GitNexus 的 query/context/impact/detect_changes/PDG 能力定位
    执行流、调用关系和潜在影响，但关键结论仍须回到实际代码和测试验证。
-4. 完成代码修改并通过最低限度验证后、提交前，使用 GitNexus
-   `detect_changes` 检查本次 diff 影响的符号和执行流；不得把图谱结果当作
-   唯一安全证明。
-5. 每个完整任务提交完成后运行
-   `bash tools/maintain_gitnexus.sh refresh`，使本地图谱对应新的 commit。
-   这属于任务边界上的增量维护，不承诺后台逐字符实时更新。
+4. 只对涉及共享执行流、跨文件重构或风险不明确的中大型代码修改使用
+   GitNexus `detect_changes`。文档、配置和明确的局部修正不做图谱影响审计。
+5. 中大型代码任务提交完成后运行
+   `bash tools/maintain_gitnexus.sh refresh`。小型修改允许延后到下一次真正需要
+   图谱的任务再统一刷新，避免为维护索引反复消耗时间。
 6. 项目固定使用 PDG、纯索引模式和 1024 KB 源码上限，以纳入
    `segearthov3_segmentor.py`；默认不生成 embeddings。
 7. 只有用户明确批准向量模型或外部 embedding 服务后，才允许启用
@@ -669,3 +673,35 @@ Never sacrifice research honesty for a more impressive-looking answer.
    不得仅依赖索引摘要。
 6. 临时渲染图、抽取文本和下载中间文件放在 `tmp/pdfs/`，不得混入参考
    论文库或提交到 GitHub。
+
+---
+
+## 18. 精简开发、审查与实验代码规则
+
+以下规则适用于本项目后续所有对话，优先用于约束工作量、代码规模和执行
+效率：
+
+1. 减少全量审查和门禁。小修改不得升级为全仓库审计、完整 paper-code
+   mapping、全量测试、全量静态扫描或知识图谱影响分析。
+2. 验证必须与改动风险成比例：
+   * 文档或注释修改：检查实际 diff 和格式即可；
+   * 单一配置或明确局部修正：做语法检查或一个最相关的定向测试；
+   * 共享核心执行流、跨文件重构或高风险算法修改：才做影响分析和必要回归。
+3. 同一轮代码没有继续变化时，不重复读取已经核查过的文件，不重复运行相同
+   测试，也不重复做 GitNexus、敏感信息或仓库状态审计。优先使用当前对话、
+   `state.md` 和现有图谱中已经确认的信息。
+4. 不做过度防御性编程。只保留能够防止真实已知错误、保护数据完整性或保证
+   实验可解释性的检查；不为纯理论边界条件叠加大量校验、兼容层和日志。
+5. 不疯狂叠加代码。新实验优先复用现有数据流、前向结果、汇总器和配置入口；
+   不为每个细小假设复制一套 runner、diagnostic、mixin 或 summary 框架。
+6. 能在现有实现中清晰完成的改动直接修改现有文件。GitHub 历史承担版本回退；
+   不因担心回退困难而长期保留多套重复实现。
+7. 用户明确停止或放弃的实验方向，不继续维护和扩展。需要再次修改相关区域
+   时，优先删除已确认无复用价值的冗余路径，再实现新方向；若删除范围可能
+   影响仍在使用的实验，先核查依赖并向用户说明。
+8. 优先关注运行效率。默认不计算、保存或汇总当前假设不需要的中间量；只有
+   能直接回答实验问题的诊断才进入前向和日志。
+9. 一项任务原则上只进行一次实现后验证和一次提交前 diff 检查。只有验证失败
+   或代码继续发生实质变化时才重跑相关检查。
+10. 研究严谨性仍然保留，但严谨不等于流程堆叠。以最小、清晰、可追溯且能
+    回答当前假设的实现为默认目标。
