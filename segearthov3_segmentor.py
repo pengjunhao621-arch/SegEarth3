@@ -2838,9 +2838,33 @@ class SegEarthOV3Segmentation(
                 if role_prompt_class_space:
                     # Synonym prompts must be averaged across crops before
                     # their class-wise max, exactly as in the official path.
-                    role_prompt_tta_preds['baseline'] = (
+                    exact_baseline = (
                         self._rpt_aggregate_query_logits_to_classes(
                             preds.detach().float().cpu()))
+                    if (
+                            self.role_prompt_tta_protocol
+                            == 'role_functional_text_screen_v1'):
+                        # Role-functional final variants are crop-wise
+                        # differentials around combo_p0_s0_i0. Re-anchor the
+                        # averaged differentials after the official
+                        # query-average -> class-max reduction so aliases do
+                        # not break the protected no-update identity.
+                        crop_anchor = role_prompt_tta_preds[
+                            'combo_p0_s0_i0'].clone()
+                        for variant_name in self._rpt_variant_names():
+                            if (
+                                    variant_name == 'baseline'
+                                    or variant_name.startswith(
+                                        'semantic_head_')
+                                    or variant_name.startswith(
+                                        'instance_head_')):
+                                continue
+                            role_prompt_tta_preds[variant_name] = (
+                                exact_baseline
+                                + role_prompt_tta_preds[variant_name]
+                                - crop_anchor
+                            ).clamp(0.0, 1.0)
+                    role_prompt_tta_preds['baseline'] = exact_baseline
             if coco_sec_prior_preds is not None:
                 coco_sec_prior_preds = coco_sec_prior_preds / count_mat
                 coco_sec_prior_preds = coco_sec_prior_preds.clamp_min(

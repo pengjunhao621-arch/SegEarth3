@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "protocol": "role_functional_text_screen_v1",
+  "dataset": "UDD5",
+  "generator": "Codex; frozen role-specific candidates generated before evaluation",
+  "frozen_before_evaluation": true,
+  "classes": [
+    {"id": 0, "name": "vegetation", "official_prompts": ["vegetation"], "presence_candidates": ["vegetation cover", "vegetated area"], "semantic_candidates": ["textured vegetation", "dense vegetation", "irregular vegetation cover"], "instance_candidates": ["vegetation patch", "connected vegetation region"]},
+    {"id": 1, "name": "building", "official_prompts": ["building"], "presence_candidates": ["buildings", "built structure"], "semantic_candidates": ["polygonal building footprint", "rectilinear building", "overhead building roof"], "instance_candidates": ["individual building", "separate building footprint"]},
+    {"id": 2, "name": "road", "official_prompts": ["road"], "presence_candidates": ["roads", "roadway"], "semantic_candidates": ["elongated road surface", "continuous road surface", "paved road surface"], "instance_candidates": ["connected road segment", "continuous road region"]},
+    {"id": 3, "name": "vehicle", "official_prompts": ["vehicle"], "presence_candidates": ["vehicles", "motor vehicle"], "semantic_candidates": ["compact vehicle", "small vehicle", "rectangular vehicle roof"], "instance_candidates": ["individual vehicle", "separate vehicle object"]},
+    {"id": 4, "name": "background", "official_prompts": ["background"], "presence_candidates": ["image background", "background region"], "semantic_candidates": ["unlabeled background", "mixed background region", "miscellaneous background"], "instance_candidates": ["background region", "miscellaneous background area"]}
+  ]
+}

@@ -49,6 +49,13 @@ from semantic_supplement_definitions import (
     VARIANT_NAMES as SEMANTIC_SUPPLEMENT_VARIANT_NAMES,
     load_semantic_supplement_bank,
 )
+from role_functional_text_definitions import (
+    PROTOCOL as ROLE_FUNCTIONAL_TEXT_PROTOCOL,
+    SCHEMA_VERSION as ROLE_FUNCTIONAL_TEXT_SCHEMA_VERSION,
+    VARIANT_NAMES as ROLE_FUNCTIONAL_TEXT_VARIANT_NAMES,
+    load_role_functional_text_bank,
+    reference_variant as role_functional_text_reference_variant,
+)
 from semantic_supplement_screen import SemanticSupplementScreenMixin
 
 # Backward-compatible export used by existing configs/tests/summarization.
@@ -520,7 +527,8 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
         if self.role_prompt_tta_protocol not in (
                 'v1', 'prompt_functional_atlas_v2',
                 'head_role_prompt_conflict_v1',
-                SEMANTIC_SUPPLEMENT_PROTOCOL):
+                SEMANTIC_SUPPLEMENT_PROTOCOL,
+                ROLE_FUNCTIONAL_TEXT_PROTOCOL):
             raise ValueError(
                 f'Unknown role_prompt_tta_protocol='
                 f'{self.role_prompt_tta_protocol!r}.')
@@ -531,7 +539,8 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
         if (
                 self.role_prompt_tta_protocol in (
                     'head_role_prompt_conflict_v1',
-                    SEMANTIC_SUPPLEMENT_PROTOCOL)
+                    SEMANTIC_SUPPLEMENT_PROTOCOL,
+                    ROLE_FUNCTIONAL_TEXT_PROTOCOL)
                 and self.role_prompt_tta_primary_variant != 'baseline'):
             raise ValueError(
                 'Prompt screening protocols are diagnostic-only and must '
@@ -548,6 +557,21 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
             if self.role_prompt_tta_protocol == SEMANTIC_SUPPLEMENT_PROTOCOL:
                 self._rpt_prompt_bank = load_semantic_supplement_bank(
                     role_prompt_tta_prompt_bank, self.class_names)
+            elif self.role_prompt_tta_protocol == ROLE_FUNCTIONAL_TEXT_PROTOCOL:
+                official_prompts = [
+                    [
+                        self.query_words[query_index]
+                        for query_index, class_index
+                        in enumerate(self.query_idx.detach().cpu().tolist())
+                        if int(class_index) == class_idx
+                    ]
+                    for class_idx in range(int(self.num_cls))
+                ]
+                self._rpt_prompt_bank = load_role_functional_text_bank(
+                    role_prompt_tta_prompt_bank,
+                    self.class_names,
+                    official_prompts,
+                )
             else:
                 self._rpt_prompt_bank = load_prompt_bank(
                     role_prompt_tta_prompt_bank, self.class_names)
@@ -574,7 +598,8 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
             ]
             if self.role_prompt_tta_protocol in (
                     'head_role_prompt_conflict_v1',
-                    SEMANTIC_SUPPLEMENT_PROTOCOL):
+                    SEMANTIC_SUPPLEMENT_PROTOCOL,
+                    ROLE_FUNCTIONAL_TEXT_PROTOCOL):
                 # This audit is native-SAM3 only.  Avoid loading RemoteCLIP or
                 # constructing any test-time optimization graph.
                 self._rpt_remoteclip = None
@@ -607,9 +632,13 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
         return getattr(self, 'role_prompt_tta_protocol', 'v1') in (
             'head_role_prompt_conflict_v1',
             SEMANTIC_SUPPLEMENT_PROTOCOL,
+            ROLE_FUNCTIONAL_TEXT_PROTOCOL,
         )
 
     def _rpt_variant_names(self):
+        if getattr(self, 'role_prompt_tta_protocol', 'v1') \
+                == ROLE_FUNCTIONAL_TEXT_PROTOCOL:
+            return ROLE_FUNCTIONAL_TEXT_VARIANT_NAMES
         if getattr(self, 'role_prompt_tta_protocol', 'v1') \
                 == SEMANTIC_SUPPLEMENT_PROTOCOL:
             return SEMANTIC_SUPPLEMENT_VARIANT_NAMES
@@ -622,6 +651,9 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
         return V1_VARIANT_NAMES
 
     def _rpt_record_schema_version(self):
+        if getattr(self, 'role_prompt_tta_protocol', 'v1') \
+                == ROLE_FUNCTIONAL_TEXT_PROTOCOL:
+            return ROLE_FUNCTIONAL_TEXT_SCHEMA_VERSION
         if getattr(self, 'role_prompt_tta_protocol', 'v1') \
                 == SEMANTIC_SUPPLEMENT_PROTOCOL:
             return SEMANTIC_SUPPLEMENT_SCHEMA_VERSION
@@ -666,7 +698,8 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
             all_prompts
             if self.role_prompt_tta_protocol in (
                 'head_role_prompt_conflict_v1',
-                SEMANTIC_SUPPLEMENT_PROTOCOL)
+                SEMANTIC_SUPPLEMENT_PROTOCOL,
+                ROLE_FUNCTIONAL_TEXT_PROTOCOL)
             else self.query_words)
         with torch.no_grad(), self._rpt_autocast_context():
             for prompt in prompts_to_encode_individually:
@@ -1964,6 +1997,14 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
     def _rpt_infer_single_view(
             self, image, return_stats=False, return_components=False,
             view_id=None, crop_box=None):
+        if self.role_prompt_tta_protocol == ROLE_FUNCTIONAL_TEXT_PROTOCOL:
+            return self._rpt_role_functional_text_infer_single_view(
+                image,
+                return_stats=return_stats,
+                return_components=return_components,
+                view_id=view_id,
+                crop_box=crop_box,
+            )
         if self.role_prompt_tta_protocol == SEMANTIC_SUPPLEMENT_PROTOCOL:
             return self._rpt_semantic_supplement_infer_single_view(
                 image,
@@ -2333,6 +2374,34 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
             enriched.append(view)
         return enriched
 
+    def _rpt_enrich_role_functional_stats_with_gt(
+            self, view_stats, gt):
+        """Attach crop-level labels used only to evaluate Presence scores."""
+        enriched = []
+        for source in view_stats:
+            view = dict(source)
+            crop_box = view.get('crop_box')
+            if crop_box is None:
+                crop_gt = gt
+            else:
+                x1, y1, x2, y2 = [int(value) for value in crop_box]
+                crop_gt = gt[y1:y2, x1:x2]
+            valid = crop_gt != 255
+            gt_presence = [
+                bool((valid & (crop_gt == class_idx)).any().item())
+                for class_idx in range(int(self.num_cls))
+            ]
+            candidate_rows = []
+            for source_row in view.get('candidate_rows', []):
+                row = dict(source_row)
+                row['gt_present'] = bool(
+                    gt_presence[int(row['class_index'])])
+                candidate_rows.append(row)
+            view['candidate_rows'] = candidate_rows
+            view['gt_class_presence'] = gt_presence
+            enriched.append(view)
+        return enriched
+
     def _rpt_record_image(self, variant_logits, view_stats, data_sample, image_path):
         if not self.dump_role_prompt_tta_stats:
             return
@@ -2345,7 +2414,8 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
         compact_predictions = (
             self.role_prompt_tta_protocol in (
                 'head_role_prompt_conflict_v1',
-                SEMANTIC_SUPPLEMENT_PROTOCOL))
+                SEMANTIC_SUPPLEMENT_PROTOCOL,
+                ROLE_FUNCTIONAL_TEXT_PROTOCOL))
         predictions = {
             name: (
                 self._rpt_threshold(logits.detach().float().cpu())
@@ -2354,7 +2424,6 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
                 else self._rpt_threshold(logits.detach().float().cpu()))
             for name, logits in variant_logits.items()
         }
-        baseline = predictions['baseline']
         variant_stats = {}
         variant_names = self._rpt_variant_names()
         if tuple(variant_logits) != tuple(variant_names):
@@ -2363,11 +2432,19 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
                 f'{tuple(variant_logits)}')
         for name in variant_names:
             pred = predictions[name]
-            changed = valid & (pred != baseline)
-            improved = changed & (pred == gt_data) & (baseline != gt_data)
-            harmed = changed & (pred != gt_data) & (baseline == gt_data)
-            wrong_to_wrong = changed & (pred != gt_data) & (baseline != gt_data)
+            reference_name = (
+                role_functional_text_reference_variant(name)
+                if self.role_prompt_tta_protocol
+                == ROLE_FUNCTIONAL_TEXT_PROTOCOL
+                else 'baseline')
+            reference = predictions[reference_name]
+            changed = valid & (pred != reference)
+            improved = changed & (pred == gt_data) & (reference != gt_data)
+            harmed = changed & (pred != gt_data) & (reference == gt_data)
+            wrong_to_wrong = (
+                changed & (pred != gt_data) & (reference != gt_data))
             variant_stats[name] = dict(
+                reference_variant=reference_name,
                 confusion=self._rpt_confusion(pred, gt_data, valid),
                 changed_pixels=int(changed.sum().item()),
                 changed_ratio=_safe_div(int(changed.sum().item()), int(valid.sum().item())),
@@ -2419,10 +2496,15 @@ class RolePromptTTAMixin(SemanticSupplementScreenMixin):
             ),
             variants=variant_stats,
             views=(
-                [dict(view) for view in view_stats]
+                (self._rpt_enrich_role_functional_stats_with_gt(
+                    view_stats, gt_data)
+                 if self.role_prompt_tta_protocol
+                 == ROLE_FUNCTIONAL_TEXT_PROTOCOL
+                 else [dict(view) for view in view_stats])
                 if self.role_prompt_tta_protocol in (
                     'head_role_prompt_conflict_v1',
-                    SEMANTIC_SUPPLEMENT_PROTOCOL)
+                    SEMANTIC_SUPPLEMENT_PROTOCOL,
+                    ROLE_FUNCTIONAL_TEXT_PROTOCOL)
                 else self._rpt_enrich_seed_stats_with_gt(
                     view_stats, gt_data)),
         )

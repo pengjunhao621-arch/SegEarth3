@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "protocol": "role_functional_text_screen_v1",
+  "dataset": "LoveDA",
+  "generator": "Codex; frozen role-specific candidates generated before evaluation",
+  "frozen_before_evaluation": true,
+  "classes": [
+    {"id": 0, "name": "background", "official_prompts": ["background"], "presence_candidates": ["image background", "background region"], "semantic_candidates": ["unlabeled background", "mixed background region", "miscellaneous background"], "instance_candidates": ["background region", "miscellaneous background area"]},
+    {"id": 1, "name": "building", "official_prompts": ["building", "house"], "presence_candidates": ["buildings", "built structure"], "semantic_candidates": ["polygonal building footprint", "rectilinear building", "overhead building roof"], "instance_candidates": ["individual building", "separate building footprint"]},
+    {"id": 2, "name": "road", "official_prompts": ["road"], "presence_candidates": ["roads", "roadway"], "semantic_candidates": ["elongated road surface", "continuous road surface", "paved road surface"], "instance_candidates": ["connected road segment", "continuous road region"]},
+    {"id": 3, "name": "water", "official_prompts": ["water"], "presence_candidates": ["water body", "waters"], "semantic_candidates": ["smooth water surface", "reflective water surface", "contiguous water region"], "instance_candidates": ["individual water body", "connected water region"]},
+    {"id": 4, "name": "barren", "official_prompts": ["barren", "bareland", "soil"], "presence_candidates": ["bare land", "barren land"], "semantic_candidates": ["exposed barren ground", "dry barren surface", "sparsely vegetated barren land"], "instance_candidates": ["barren patch", "connected bareland region"]},
+    {"id": 5, "name": "forest", "official_prompts": ["forest", "tree"], "presence_candidates": ["forests", "tree cover"], "semantic_candidates": ["dense forest canopy", "textured forest canopy", "contiguous forest cover"], "instance_candidates": ["forest patch", "connected forest region"]},
+    {"id": 6, "name": "agricultural", "official_prompts": ["agricultural"], "presence_candidates": ["agriculture", "cropland"], "semantic_candidates": ["patterned agricultural land", "cultivated agricultural land", "parcelled agricultural land"], "instance_candidates": ["agricultural parcel", "separate cultivated field"]}
+  ]
+}

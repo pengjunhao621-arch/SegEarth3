@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "protocol": "role_functional_text_screen_v1",
+  "dataset": "Potsdam",
+  "generator": "Codex; frozen role-specific candidates generated before evaluation",
+  "frozen_before_evaluation": true,
+  "classes": [
+    {"id": 0, "name": "road", "official_prompts": ["road"], "presence_candidates": ["roads", "impervious surface"], "semantic_candidates": ["elongated road surface", "continuous road surface", "paved road surface"], "instance_candidates": ["connected road segment", "continuous impervious region"]},
+    {"id": 1, "name": "building", "official_prompts": ["building"], "presence_candidates": ["buildings", "built structure"], "semantic_candidates": ["polygonal building footprint", "rectilinear building", "overhead building roof"], "instance_candidates": ["individual building", "separate building footprint"]},
+    {"id": 2, "name": "grass", "official_prompts": ["grass"], "presence_candidates": ["grass cover", "low vegetation"], "semantic_candidates": ["low grass cover", "smooth grass surface", "homogeneous grass region"], "instance_candidates": ["grass patch", "connected grass region"]},
+    {"id": 3, "name": "tree", "official_prompts": ["tree"], "presence_candidates": ["trees", "tree cover"], "semantic_candidates": ["textured tree canopy", "irregular tree crown", "dense tree canopy"], "instance_candidates": ["individual tree", "separate tree crown"]},
+    {"id": 4, "name": "car", "official_prompts": ["car"], "presence_candidates": ["cars", "automobile"], "semantic_candidates": ["compact car", "small car", "rectangular car roof"], "instance_candidates": ["individual car", "separate car object"]},
+    {"id": 5, "name": "clutter", "official_prompts": ["clutter"], "presence_candidates": ["background clutter", "miscellaneous clutter"], "semantic_candidates": ["mixed clutter", "irregular clutter region", "miscellaneous clutter region"], "instance_candidates": ["clutter region", "separate clutter patch"]}
+  ]
+}
