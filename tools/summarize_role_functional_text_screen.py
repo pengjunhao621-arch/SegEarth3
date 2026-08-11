@@ -424,6 +424,248 @@ def build_interaction_rows(variant_rows):
     return output
 
 
+def _factorial_components(value_at, presence_slot, semantic_slot,
+                          instance_slot):
+    f000 = float(value_at(0, 0, 0))
+    fp = float(value_at(presence_slot, 0, 0))
+    fs = float(value_at(0, semantic_slot, 0))
+    fi = float(value_at(0, 0, instance_slot))
+    fps = float(value_at(presence_slot, semantic_slot, 0))
+    fpi = float(value_at(presence_slot, 0, instance_slot))
+    fsi = float(value_at(0, semantic_slot, instance_slot))
+    fpsi = float(value_at(
+        presence_slot, semantic_slot, instance_slot))
+    main_p = fp - f000
+    main_s = fs - f000
+    main_i = fi - f000
+    gamma_ps = fps - fp - fs + f000
+    gamma_pi = fpi - fp - fi + f000
+    gamma_si = fsi - fs - fi + f000
+    gamma_psi = (
+        fpsi - fps - fpi - fsi + fp + fs + fi - f000)
+    delta = fpsi - f000
+    total_interaction = delta - main_p - main_s - main_i
+    reconstruction = (
+        main_p + main_s + main_i + gamma_ps + gamma_pi + gamma_si
+        + gamma_psi)
+    return dict(
+        baseline=f000,
+        full=fpsi,
+        delta=delta,
+        main_p=main_p,
+        main_s=main_s,
+        main_i=main_i,
+        gamma_ps=gamma_ps,
+        gamma_pi=gamma_pi,
+        gamma_si=gamma_si,
+        gamma_psi=gamma_psi,
+        total_interaction=total_interaction,
+        reconstruction_error=delta - reconstruction,
+    )
+
+
+def _add_factorial_fields(row, prefix, components):
+    row.update({
+        f'baseline_{prefix}': components['baseline'],
+        f'full_{prefix}': components['full'],
+        f'delta_{prefix}': components['delta'],
+        f'main_p_{prefix}': components['main_p'],
+        f'main_s_{prefix}': components['main_s'],
+        f'main_i_{prefix}': components['main_i'],
+        f'gamma_ps_{prefix}': components['gamma_ps'],
+        f'gamma_pi_{prefix}': components['gamma_pi'],
+        f'gamma_si_{prefix}': components['gamma_si'],
+        f'gamma_psi_{prefix}': components['gamma_psi'],
+        f'total_interaction_{prefix}': components['total_interaction'],
+        f'reconstruction_error_{prefix}': components[
+            'reconstruction_error'],
+    })
+
+
+def _interaction_summary_row(dataset, interaction, values):
+    values = [float(value) for value in values]
+    return dict(
+        dataset=dataset,
+        interaction=interaction,
+        combinations=len(values),
+        mean_gamma=mean(values),
+        mean_abs_gamma=mean([abs(value) for value in values]),
+        positive_count=sum(value > 0.0 for value in values),
+        negative_count=sum(value < 0.0 for value in values),
+        zero_count=sum(value == 0.0 for value in values),
+        max_gamma=max(values),
+        min_gamma=min(values),
+    )
+
+
+def build_factorial_diagnosis(variant_rows, class_rows):
+    variant_lookup = {
+        (row['dataset'], row['variant']): row for row in variant_rows}
+    class_lookup = {
+        (row['dataset'], int(row['class_index']), row['variant']): row
+        for row in class_rows
+    }
+    datasets = sorted({row['dataset'] for row in variant_rows})
+    factorial_rows = []
+    class_factorial_rows = []
+    for dataset in datasets:
+        def dataset_value(field):
+            return lambda p, s, i: variant_lookup[(
+                dataset, combo_variant_name(p, s, i))][field]
+
+        for presence_slot in range(1, 3):
+            for semantic_slot in range(1, 4):
+                for instance_slot in range(1, 3):
+                    row = dict(
+                        dataset=dataset,
+                        presence_slot=presence_slot,
+                        semantic_slot=semantic_slot,
+                        instance_slot=instance_slot,
+                        variant=combo_variant_name(
+                            presence_slot, semantic_slot, instance_slot),
+                    )
+                    for field, prefix in (
+                            ('miou', 'miou'),
+                            ('aacc', 'aacc'),
+                            ('improved_pixels', 'improved_pixels'),
+                            ('harmed_pixels', 'harmed_pixels'),
+                            ('help_minus_harm', 'net_pixels')):
+                        components = _factorial_components(
+                            dataset_value(field), presence_slot,
+                            semantic_slot, instance_slot)
+                        _add_factorial_fields(row, prefix, components)
+                    factorial_rows.append(row)
+
+        class_indices = sorted({
+            int(row['class_index']) for row in class_rows
+            if row['dataset'] == dataset})
+        for class_index in class_indices:
+            baseline = class_lookup[(
+                dataset, class_index, 'baseline')]
+
+            def class_value(p, s, i):
+                value = class_lookup[(
+                    dataset, class_index,
+                    combo_variant_name(p, s, i))]['iou']
+                if value is None:
+                    raise ValueError(
+                        f'{dataset}/{class_index}: undefined class IoU.')
+                return value
+
+            for presence_slot in range(1, 3):
+                for semantic_slot in range(1, 4):
+                    for instance_slot in range(1, 3):
+                        components = _factorial_components(
+                            class_value, presence_slot, semantic_slot,
+                            instance_slot)
+                        row = dict(
+                            dataset=dataset,
+                            class_index=class_index,
+                            class_name=baseline['class_name'],
+                            presence_slot=presence_slot,
+                            semantic_slot=semantic_slot,
+                            instance_slot=instance_slot,
+                            variant=combo_variant_name(
+                                presence_slot, semantic_slot, instance_slot),
+                        )
+                        _add_factorial_fields(row, 'iou', components)
+                        class_factorial_rows.append(row)
+
+    # Pairwise terms are independent of the third active slot. Collapse the
+    # repeated values so summary counts reflect unique factorial contrasts.
+    summary_rows = []
+    macro = defaultdict(list)
+    for dataset in datasets:
+        rows = [row for row in factorial_rows
+                if row['dataset'] == dataset]
+        unique = {
+            'ps': {(row['presence_slot'], row['semantic_slot']):
+                   row['gamma_ps_miou'] for row in rows},
+            'pi': {(row['presence_slot'], row['instance_slot']):
+                   row['gamma_pi_miou'] for row in rows},
+            'si': {(row['semantic_slot'], row['instance_slot']):
+                   row['gamma_si_miou'] for row in rows},
+            'psi': {(row['presence_slot'], row['semantic_slot'],
+                     row['instance_slot']): row['gamma_psi_miou']
+                    for row in rows},
+            'total': {(row['presence_slot'], row['semantic_slot'],
+                       row['instance_slot']):
+                      row['total_interaction_miou'] for row in rows},
+        }
+        for interaction, mapping in unique.items():
+            values = list(mapping.values())
+            summary_rows.append(_interaction_summary_row(
+                dataset, interaction, values))
+            macro[interaction].extend(values)
+    for interaction, values in sorted(macro.items()):
+        summary_rows.append(_interaction_summary_row(
+            'macro', interaction, values))
+    return factorial_rows, class_factorial_rows, summary_rows
+
+
+def write_interaction_markdown(path, factorial_rows, summary_rows):
+    datasets = sorted({row['dataset'] for row in factorial_rows})
+    lines = [
+        '# Native-fusion-aware role interaction diagnosis', '',
+        '- Source: the existing 36 fixed P/S/I combinations; no new SAM3 '
+        'forward.',
+        '- Terms are counterfactual performance interactions, not feature-level '
+        'causal decompositions.',
+        '- Existing records support aggregate mIoU/class-IoU and corrected/'
+        'harmed-pixel counts. They do not contain per-pixel S/I winner maps or '
+        'per-query admission identities.',
+        '', '## Best all-role combination per dataset', '',
+        '| Dataset | Variant | Delta mIoU | Main-effect sum | Total interaction '
+        '| Gamma PS | Gamma PI | Gamma SI | Gamma PSI |',
+        '|---|---|---:|---:|---:|---:|---:|---:|---:|',
+    ]
+    for dataset in datasets:
+        rows = [row for row in factorial_rows
+                if row['dataset'] == dataset]
+        best = max(rows, key=lambda row: row['delta_miou'])
+        main_sum = (best['main_p_miou'] + best['main_s_miou']
+                    + best['main_i_miou'])
+        lines.append(
+            f"| {dataset} | {best['variant']} | "
+            f"{best['delta_miou']:+.3f} | {main_sum:+.3f} | "
+            f"{best['total_interaction_miou']:+.3f} | "
+            f"{best['gamma_ps_miou']:+.3f} | "
+            f"{best['gamma_pi_miou']:+.3f} | "
+            f"{best['gamma_si_miou']:+.3f} | "
+            f"{best['gamma_psi_miou']:+.3f} |")
+    lines.extend([
+        '', '## Mean absolute interaction by dataset', '',
+        '| Dataset | PS | PI | SI | PSI | Total non-additivity |',
+        '|---|---:|---:|---:|---:|---:|',
+    ])
+    lookup = {(row['dataset'], row['interaction']): row
+              for row in summary_rows}
+    for dataset in datasets + ['macro']:
+        values = [lookup[(dataset, name)]['mean_abs_gamma']
+                  for name in ('ps', 'pi', 'si', 'psi', 'total')]
+        lines.append(
+            f'| {dataset} | ' + ' | '.join(
+                f'{value:.3f}' for value in values) + ' |')
+    lines.extend([
+        '', '## Maximum and minimum all-role interaction', '',
+        '| Dataset | Maximum-interaction variant | Interaction | '
+        'Minimum-interaction variant | '
+        'Interaction |',
+        '|---|---|---:|---|---:|',
+    ])
+    for dataset in datasets:
+        rows = [row for row in factorial_rows
+                if row['dataset'] == dataset]
+        high = max(rows, key=lambda row: row['total_interaction_miou'])
+        low = min(rows, key=lambda row: row['total_interaction_miou'])
+        lines.append(
+            f"| {dataset} | {high['variant']} | "
+            f"{high['total_interaction_miou']:+.3f} | "
+            f"{low['variant']} | {low['total_interaction_miou']:+.3f} |")
+    with open(path, 'w', encoding='utf-8') as handle:
+        handle.write('\n'.join(lines) + '\n')
+
+
 def write_markdown(path, records, missing, duplicate_counts, variant_rows,
                    sensitivity_rows, controls):
     datasets = sorted({row['dataset'] for row in variant_rows})
@@ -504,6 +746,8 @@ def main():
         controls.append(result[4])
     sensitivity_rows = build_sensitivity_rows(variant_rows)
     interaction_rows = build_interaction_rows(variant_rows)
+    factorial_rows, class_factorial_rows, interaction_summary_rows = (
+        build_factorial_diagnosis(variant_rows, class_rows))
 
     os.makedirs(args.out_dir, exist_ok=True)
     write_csv(os.path.join(args.out_dir, 'dataset_variants.csv'), variant_rows)
@@ -514,6 +758,12 @@ def main():
               sensitivity_rows)
     write_csv(os.path.join(args.out_dir, 'combination_interactions.csv'),
               interaction_rows)
+    write_csv(os.path.join(args.out_dir, 'factorial_interactions.csv'),
+              factorial_rows)
+    write_csv(os.path.join(args.out_dir, 'factorial_class_interactions.csv'),
+              class_factorial_rows)
+    write_csv(os.path.join(args.out_dir, 'role_interaction_summary.csv'),
+              interaction_summary_rows)
     write_csv(os.path.join(args.out_dir, 'integrity_and_memory.csv'), controls)
     payload = dict(
         protocol=PROTOCOL,
@@ -526,6 +776,9 @@ def main():
         presence_scores=presence_rows,
         residual_sensitivity=sensitivity_rows,
         combination_interactions=interaction_rows,
+        factorial_interactions=factorial_rows,
+        factorial_class_interactions=class_factorial_rows,
+        role_interaction_summary=interaction_summary_rows,
         controls=controls,
     )
     with open(os.path.join(args.out_dir, 'summary.json'), 'w',
@@ -534,6 +787,9 @@ def main():
     write_markdown(
         os.path.join(args.out_dir, 'summary.md'), records, missing,
         duplicate_counts, variant_rows, sensitivity_rows, controls)
+    write_interaction_markdown(
+        os.path.join(args.out_dir, 'interaction_diagnosis.md'),
+        factorial_rows, interaction_summary_rows)
 
 
 if __name__ == '__main__':
