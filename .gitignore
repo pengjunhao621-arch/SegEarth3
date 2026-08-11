@@ -40,10 +40,7 @@ Thumbs.db
 /dataset/
 /datasets/
 /pretrained/
-/weights/*
-!/weights/remoteclip/
-/weights/remoteclip/*
-!/weights/remoteclip/README.md
+/weights/
 *.pt
 *.pth
 *.ckpt
@@ -104,15 +101,6 @@ seg_pred.png
 /segearthov3_segmentor(baseline).py
 /.git-official-backup/
 
-# SCORE is used only as a vendored RemoteCLIP/OpenCLIP runtime dependency.
-# Keep its license and the minimal importable open_clip package; exclude the
-# separate SCORE research project, images, notebooks, docs, and configs.
-/SCORE-main/*
-!/SCORE-main/LICENSE
-!/SCORE-main/open_clip_training/
-/SCORE-main/open_clip_training/*
-!/SCORE-main/open_clip_training/LICENSE
-!/SCORE-main/open_clip_training/src/
-/SCORE-main/open_clip_training/src/*
-!/SCORE-main/open_clip_training/src/open_clip/
-!/SCORE-main/open_clip_training/src/open_clip/**
+# Historical reference repositories are local research material, not runtime
+# dependencies of the retained baseline or role-functional text experiment.
+/SCORE-main/

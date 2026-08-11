@@ -37,8 +37,8 @@ def class_file(path):
 def static_checks():
     sources = (
         'role_functional_text_definitions.py',
-        'semantic_supplement_screen.py',
-        'role_prompt_tta.py',
+        'role_functional_text_screen.py',
+        'segearthov3_segmentor.py',
         'tools/summarize_role_functional_text_screen.py',
     )
     for relative in sources:
