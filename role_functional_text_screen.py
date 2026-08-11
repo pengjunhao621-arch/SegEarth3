@@ -11,6 +11,10 @@ import torch.nn.functional as F
 
 from role_functional_text_definitions import (
     DEFAULT_SETTING,
+    PI_MECHANISM_MAP_NAMES,
+    PI_PROTOCOL,
+    PI_SCHEMA_VERSION,
+    PI_VARIANT_NAMES,
     PROTOCOL,
     RESIDUAL_SETTINGS,
     ROLE_FIELDS,
@@ -68,6 +72,9 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_save_npz=False,
             role_prompt_tta_artifact_max_side=128,
             role_prompt_tta_max_saved_images=8,
+            role_prompt_tta_pi_diagnosis=False,
+            role_prompt_tta_pi_presence_slot=0,
+            role_prompt_tta_pi_instance_slot=0,
             **kwargs):
         self.use_role_prompt_tta = bool(use_role_prompt_tta)
         self.dump_role_prompt_tta_stats = bool(dump_role_prompt_tta_stats)
@@ -87,6 +94,12 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_artifact_max_side)
         self.role_prompt_tta_max_saved_images = int(
             role_prompt_tta_max_saved_images)
+        self.role_prompt_tta_pi_diagnosis = bool(
+            role_prompt_tta_pi_diagnosis)
+        self.role_prompt_tta_pi_presence_slot = int(
+            role_prompt_tta_pi_presence_slot)
+        self.role_prompt_tta_pi_instance_slot = int(
+            role_prompt_tta_pi_instance_slot)
         self._role_prompt_tta_stats_file = None
         self._role_prompt_tta_saved_images = 0
         self._rpt_text_cache = None
@@ -105,6 +118,13 @@ class RoleFunctionalTextScreenMixin:
                 'The diagnostic must return the protected baseline.')
         if not role_prompt_tta_prompt_bank:
             raise ValueError('role_prompt_tta_prompt_bank is required.')
+        if self.role_prompt_tta_pi_diagnosis:
+            if self.role_prompt_tta_pi_presence_slot not in (1, 2):
+                raise ValueError(
+                    'PI diagnosis presence slot must be 1 or 2.')
+            if self.role_prompt_tta_pi_instance_slot not in (1, 2):
+                raise ValueError(
+                    'PI diagnosis instance slot must be 1 or 2.')
         official_prompts = [
             [
                 self.query_words[query_index]
@@ -125,15 +145,27 @@ class RoleFunctionalTextScreenMixin:
     def _uses_role_prompt_tta(self):
         return bool(
             getattr(self, 'use_role_prompt_tta', False)
-            or getattr(self, 'dump_role_prompt_tta_stats', False))
+            or getattr(self, 'dump_role_prompt_tta_stats', False)
+            or getattr(self, 'role_prompt_tta_pi_diagnosis', False))
 
     @staticmethod
     def _rpt_uses_class_space_variants():
         return True
 
+    def _rpt_uses_pi_diagnosis(self):
+        return bool(getattr(self, 'role_prompt_tta_pi_diagnosis', False))
+
     @staticmethod
     def _rpt_variant_names():
         return VARIANT_NAMES
+
+    @staticmethod
+    def _rpt_pi_variant_names():
+        return PI_VARIANT_NAMES
+
+    @staticmethod
+    def _rpt_pi_mechanism_map_names():
+        return PI_MECHANISM_MAP_NAMES
 
     def _rpt_autocast_context(self):
         return (
@@ -244,23 +276,48 @@ class RoleFunctionalTextScreenMixin:
         )
 
     def _rpt_head_role_instance_from_raw(
-            self, package, presence, output_shape):
+            self, package, presence, output_shape,
+            admission_presence=None, amplitude_presence=None,
+            return_admission=False):
         height, width = output_shape
         if not self.use_transformer_decoder:
-            return torch.zeros((height, width), dtype=torch.float32), 0
+            empty = torch.zeros((height, width), dtype=torch.float32)
+            if return_admission:
+                return empty, 0, dict(
+                    keep=torch.zeros(0, dtype=torch.bool),
+                    margin=torch.zeros(0, dtype=torch.float32))
+            return empty, 0
         count = min(
             int(package['raw_masks'].shape[0]),
             int(package['raw_scores'].numel()))
         if count == 0:
-            return torch.zeros((height, width), dtype=torch.float32), 0
+            empty = torch.zeros((height, width), dtype=torch.float32)
+            if return_admission:
+                return empty, 0, dict(
+                    keep=torch.zeros(0, dtype=torch.bool),
+                    margin=torch.zeros(0, dtype=torch.float32))
+            return empty, 0
         raw_scores = package['raw_scores'][:count].to(self.device)
         presence = torch.as_tensor(
             presence, device=self.device, dtype=raw_scores.dtype)
-        candidate_scores = raw_scores * presence
-        keep = candidate_scores > float(self.processor.confidence_threshold)
+        admission_presence = torch.as_tensor(
+            presence if admission_presence is None else admission_presence,
+            device=self.device, dtype=raw_scores.dtype)
+        amplitude_presence = torch.as_tensor(
+            presence if amplitude_presence is None else amplitude_presence,
+            device=self.device, dtype=raw_scores.dtype)
+        admission_scores = raw_scores * admission_presence
+        margin = admission_scores.float() - float(
+            self.processor.confidence_threshold)
+        keep = admission_scores > float(self.processor.confidence_threshold)
         kept_count = int(keep.sum().item())
         if kept_count == 0:
-            return torch.zeros((height, width), dtype=torch.float32), 0
+            empty = torch.zeros((height, width), dtype=torch.float32)
+            if return_admission:
+                return empty, 0, dict(
+                    keep=keep.detach().bool().cpu(),
+                    margin=margin.detach().float().cpu())
+            return empty, 0
         masks = package['raw_masks'][:count].to(self.device)[keep]
         with torch.no_grad(), self._rpt_autocast_context():
             masks = sam3_interpolate(
@@ -272,11 +329,35 @@ class RoleFunctionalTextScreenMixin:
             amplitudes = (
                 raw_scores[keep]
                 if self.instance_score_type == 'raw'
-                else candidate_scores[keep])
+                else (raw_scores * amplitude_presence)[keep])
             instance = (
                 masks.float() * amplitudes.float()[:, None, None]
             ).max(dim=0)[0]
-        return instance.detach().float().cpu(), kept_count
+        result = instance.detach().float().cpu()
+        if return_admission:
+            return result, kept_count, dict(
+                keep=keep.detach().bool().cpu(),
+                margin=margin.detach().float().cpu())
+        return result, kept_count
+
+    def _rft_query_support_from_raw(self, package, selection, output_shape):
+        """Union support of a selected raw-query subset for diagnosis."""
+        height, width = output_shape
+        count = min(
+            int(package['raw_masks'].shape[0]),
+            int(torch.as_tensor(selection).numel()))
+        if count == 0:
+            return torch.zeros((height, width), dtype=torch.float32)
+        selection = torch.as_tensor(selection).bool().flatten()[:count]
+        if not selection.any():
+            return torch.zeros((height, width), dtype=torch.float32)
+        masks = package['raw_masks'][:count][selection].to(
+            self.device).float()
+        with torch.no_grad():
+            masks = sam3_interpolate(
+                masks.unsqueeze(1), size=output_shape, mode='bilinear',
+                align_corners=False).sigmoid().squeeze(1)
+        return masks.max(dim=0)[0].detach().float().cpu()
 
     def _rpt_head_role_compose(
             self, semantic_package, instance_package, presence_package,
@@ -341,6 +422,125 @@ class RoleFunctionalTextScreenMixin:
         if self.use_presence_score:
             final = final * float(torch.as_tensor(presence).float().item())
         return final
+
+    def _rft_pi_compatibility_replays(
+            self, anchor, presence_package, instance_package, output_shape,
+            alpha, clip):
+        """Replay selected P/I residuals at native Presence intervention sites.
+
+        These maps are counterfactual diagnostics. They preserve the shared
+        SAM3 grounding outputs and change only where the bounded Presence
+        residual participates in query admission, instance amplitude and the
+        final branch fusion.
+        """
+        semantic = anchor['semantic'].float()
+        p0 = torch.as_tensor(anchor['presence']).float().reshape(())
+        p1, _ = self._rft_bounded(
+            p0, presence_package['presence'], alpha, clip)
+
+        def instance(package, admission, amplitude, details=False):
+            return self._rpt_head_role_instance_from_raw(
+                package, amplitude, output_shape,
+                admission_presence=admission,
+                amplitude_presence=amplitude,
+                return_admission=details)
+
+        i00, _, anchor_a0 = instance(anchor, p0, p0, True)
+        i10, _ = instance(anchor, p1, p1)
+        candidate_i0, _, candidate_a0 = instance(
+            instance_package, p0, p0, True)
+        candidate_i1, _, candidate_a1 = instance(
+            instance_package, p1, p1, True)
+        i01, _ = self._rft_bounded(
+            i00, candidate_i0, alpha, clip)
+        i11, _ = self._rft_bounded(
+            i10, candidate_i1, alpha, clip)
+
+        anchor_admission_frozen, _ = instance(anchor, p0, p1)
+        candidate_admission_frozen, _ = instance(
+            instance_package, p0, p1)
+        i11_freeze_admission, _ = self._rft_bounded(
+            anchor_admission_frozen, candidate_admission_frozen,
+            alpha, clip)
+
+        anchor_amplitude_frozen, _ = instance(anchor, p1, p0)
+        candidate_amplitude_frozen, _ = instance(
+            instance_package, p1, p0)
+        i11_freeze_amplitude, _ = self._rft_bounded(
+            anchor_amplitude_frozen, candidate_amplitude_frozen,
+            alpha, clip)
+
+        def native_final(presence, instance_map):
+            return self._rft_role_final(
+                semantic, instance_map, presence, output_shape)
+
+        def branch_once(presence, instance_map):
+            if not self.use_presence_score:
+                return torch.maximum(semantic, instance_map)
+            return torch.maximum(
+                semantic * float(presence.item()), instance_map)
+
+        f00 = native_final(p0, i00)
+        f10 = native_final(p1, i10)
+        f01 = native_final(p0, i01)
+        f11 = native_final(p1, i11)
+        i_only_semantic_wins = semantic >= i01
+        held_winner = torch.where(i_only_semantic_wins, semantic, i11)
+        if self.use_presence_score:
+            held_winner = held_winner * float(p1.item())
+
+        role_finals = OrderedDict((
+            ('pi_native_p0_i0', f00),
+            ('pi_native_p1_i0', f10),
+            ('pi_native_p0_i1', f01),
+            ('pi_native_p1_i1', f11),
+            ('pi_freeze_admission_p1_i1', native_final(
+                p1, i11_freeze_admission)),
+            ('pi_freeze_amplitude_p1_i1', native_final(
+                p1, i11_freeze_amplitude)),
+            ('pi_hold_i_only_winner_p1_i1', held_winner),
+            ('pi_branch_once_p0_i0', branch_once(p0, i00)),
+            ('pi_branch_once_p1_i0', branch_once(p1, i10)),
+            ('pi_branch_once_p0_i1', branch_once(p0, i01)),
+            ('pi_branch_once_p1_i1', branch_once(p1, i11)),
+        ))
+        if tuple(role_finals) != PI_VARIANT_NAMES:
+            raise RuntimeError('PI replay variant order drifted.')
+
+        keep0 = candidate_a0['keep']
+        keep1 = candidate_a1['keep']
+        added = keep1 & ~keep0
+        removed = keep0 & ~keep1
+        margin0 = candidate_a0['margin']
+        margin1 = candidate_a1['margin']
+        query_row = dict(
+            p0=float(p0.item()),
+            p1=float(p1.item()),
+            presence_delta=float((p1 - p0).item()),
+            candidate_query_count=int(keep0.numel()),
+            admitted_p0=int(keep0.sum().item()),
+            admitted_p1=int(keep1.sum().item()),
+            admission_added=int(added.sum().item()),
+            admission_removed=int(removed.sum().item()),
+            admission_unchanged=int((keep0 == keep1).sum().item()),
+            min_abs_margin_p0=(float(margin0.abs().min().item())
+                               if margin0.numel() else None),
+            min_abs_margin_p1=(float(margin1.abs().min().item())
+                               if margin1.numel() else None),
+            anchor_admitted_p0=int(anchor_a0['keep'].sum().item()),
+        )
+        mechanism_maps = OrderedDict((
+            ('semantic_anchor', semantic),
+            ('instance_i_only', i01),
+            ('instance_pi', i11),
+            ('admission_added_support', self._rft_query_support_from_raw(
+                instance_package, added, output_shape)),
+            ('admission_removed_support', self._rft_query_support_from_raw(
+                instance_package, removed, output_shape)),
+        ))
+        if tuple(mechanism_maps) != PI_MECHANISM_MAP_NAMES:
+            raise RuntimeError('PI mechanism map order drifted.')
+        return role_finals, mechanism_maps, query_row
 
     def _rpt_infer_single_view(
             self, image, return_stats=False, return_components=False,
@@ -419,6 +619,20 @@ class RoleFunctionalTextScreenMixin:
                 device='cpu'))
             for name in VARIANT_NAMES)
         variants['baseline'].copy_(baseline_class)
+        pi_variants = None
+        pi_mechanism_maps = None
+        pi_query_rows = []
+        if self._rpt_uses_pi_diagnosis():
+            pi_variants = OrderedDict(
+                (name, torch.empty(
+                    (self.num_cls, height, width), dtype=torch.float32,
+                    device='cpu'))
+                for name in PI_VARIANT_NAMES)
+            pi_mechanism_maps = OrderedDict(
+                (name, torch.empty(
+                    (self.num_cls, height, width), dtype=torch.float32,
+                    device='cpu'))
+                for name in PI_MECHANISM_MAP_NAMES)
         settings = {
             name: (float(alpha), float(clip))
             for name, alpha, clip in RESIDUAL_SETTINGS
@@ -527,6 +741,35 @@ class RoleFunctionalTextScreenMixin:
                         variants[f'instance_head_i{slot}'][
                             class_index].copy_(value)
 
+            if self._rpt_uses_pi_diagnosis():
+                pi_role_finals, pi_maps, pi_query_row = (
+                    self._rft_pi_compatibility_replays(
+                        anchor,
+                        role_packages['presence'][
+                            self.role_prompt_tta_pi_presence_slot],
+                        role_packages['instance'][
+                            self.role_prompt_tta_pi_instance_slot],
+                        output_shape, default_alpha, default_clip))
+                for name, role_final in pi_role_finals.items():
+                    pi_variants[name][class_index].copy_((
+                        official_final.float() + role_final.float()
+                        - role_anchor_final.float()).clamp(0.0, 1.0))
+                for name, value in pi_maps.items():
+                    pi_mechanism_maps[name][class_index].copy_(value)
+                pi_query_rows.append(dict(
+                    class_index=int(class_index),
+                    class_name=item['name'],
+                    presence_slot=int(
+                        self.role_prompt_tta_pi_presence_slot),
+                    instance_slot=int(
+                        self.role_prompt_tta_pi_instance_slot),
+                    presence_prompt=item['presence_candidates'][
+                        self.role_prompt_tta_pi_presence_slot - 1],
+                    instance_prompt=item['instance_candidates'][
+                        self.role_prompt_tta_pi_instance_slot - 1],
+                    **pi_query_row,
+                ))
+
             def compose(presence_slot=0, semantic_slot=0, instance_slot=0,
                         setting=DEFAULT_SETTING, shared_package=None):
                 alpha, clip = settings[setting]
@@ -602,15 +845,35 @@ class RoleFunctionalTextScreenMixin:
         identity_error = float((
             variants['combo_p0_s0_i0'] - variants['baseline']
         ).abs().max().item())
+        pi_identity_error = 0.0
+        pi_replay_match_error = 0.0
+        if pi_variants is not None:
+            pi_identity_error = float((
+                pi_variants['pi_native_p0_i0'] - variants['baseline']
+            ).abs().max().item())
+            p_slot = self.role_prompt_tta_pi_presence_slot
+            i_slot = self.role_prompt_tta_pi_instance_slot
+            replay_pairs = (
+                ('pi_native_p0_i0', combo_variant_name(0, 0, 0)),
+                ('pi_native_p1_i0', combo_variant_name(p_slot, 0, 0)),
+                ('pi_native_p0_i1', combo_variant_name(0, 0, i_slot)),
+                ('pi_native_p1_i1', combo_variant_name(p_slot, 0, i_slot)),
+            )
+            pi_replay_match_error = max(float((
+                pi_variants[pi_name] - variants[combo_name]
+            ).abs().max().item()) for pi_name, combo_name in replay_pairs)
         recomposition_error = max(recomposition_errors or [0.0])
         if tuple(variants) != VARIANT_NAMES:
             raise RuntimeError('Role-functional variant order drifted.')
         if (self.role_prompt_tta_strict_integrity
-                and max(identity_error, recomposition_error)
+                and max(identity_error, recomposition_error,
+                        pi_identity_error, pi_replay_match_error)
                 > self.role_prompt_tta_integrity_tolerance):
             raise RuntimeError(
                 'Role-functional integrity failed: '
                 f'identity={identity_error}, '
+                f'pi_identity={pi_identity_error}, '
+                f'pi_replay_match={pi_replay_match_error}, '
                 f'native_recomposition={recomposition_error}.')
 
         view_stats = dict(
@@ -624,6 +887,8 @@ class RoleFunctionalTextScreenMixin:
             baseline_reconstruction_max_abs=float(
                 self._rpt_native_parity_max_abs or 0.0),
             no_update_identity_max_abs=identity_error,
+            pi_no_update_identity_max_abs=pi_identity_error,
+            pi_replay_match_max_abs=pi_replay_match_error,
             native_recomposition_max_abs=recomposition_error,
             official_query_count=int(self.num_queries),
             canonical_class_count=int(self.num_cls),
@@ -637,6 +902,16 @@ class RoleFunctionalTextScreenMixin:
                 for name, alpha, clip in RESIDUAL_SETTINGS],
             candidate_rows=candidate_rows,
             class_rows=class_rows,
+            pi_diagnosis=(
+                dict(
+                    schema_version=PI_SCHEMA_VERSION,
+                    protocol=PI_PROTOCOL,
+                    presence_slot=int(
+                        self.role_prompt_tta_pi_presence_slot),
+                    instance_slot=int(
+                        self.role_prompt_tta_pi_instance_slot),
+                    query_rows=pi_query_rows,
+                ) if pi_variants is not None else None),
             cuda_memory=dict(main=_cuda_memory_snapshot(self.device)),
         )
         primary = baseline_query['final'].to(self.device)
@@ -646,6 +921,10 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_variant_class_logits=variants,
             role_prompt_view_stats=[view_stats],
         )
+        if pi_variants is not None:
+            components['role_prompt_pi_variant_class_logits'] = pi_variants
+            components['role_prompt_pi_mechanism_class_maps'] = (
+                pi_mechanism_maps)
         stats = dict(
             view_id=view_id,
             crop_box=crop_box,
@@ -713,8 +992,152 @@ class RoleFunctionalTextScreenMixin:
             enriched.append(view)
         return enriched
 
+    def _rft_pi_record(
+            self, pi_variant_logits, mechanism_maps, gt, valid):
+        if pi_variant_logits is None or mechanism_maps is None:
+            return None
+        if tuple(pi_variant_logits) != PI_VARIANT_NAMES:
+            raise RuntimeError('Recorded PI replay variants drifted.')
+        if tuple(mechanism_maps) != PI_MECHANISM_MAP_NAMES:
+            raise RuntimeError('Recorded PI mechanism maps drifted.')
+
+        logits = {
+            name: value.detach().float().cpu()
+            for name, value in pi_variant_logits.items()
+        }
+        predictions = {
+            name: self._rpt_threshold(value).to(torch.int16)
+            for name, value in logits.items()
+        }
+        reference = predictions['pi_native_p0_i0']
+        variant_stats = {}
+        for name in PI_VARIANT_NAMES:
+            prediction = predictions[name]
+            changed = valid & (prediction != reference)
+            improved = changed & (prediction == gt) & (reference != gt)
+            harmed = changed & (prediction != gt) & (reference == gt)
+            variant_stats[name] = dict(
+                confusion=self._rpt_confusion(prediction, gt, valid),
+                changed_pixels=int(changed.sum().item()),
+                improved_pixels=int(improved.sum().item()),
+                harmed_pixels=int(harmed.sum().item()),
+                help_minus_harm=(int(improved.sum().item())
+                                 - int(harmed.sum().item())),
+            )
+
+        semantic = mechanism_maps['semantic_anchor'].detach().float().cpu()
+        instance_i_only = (
+            mechanism_maps['instance_i_only'].detach().float().cpu())
+        instance_pi = mechanism_maps['instance_pi'].detach().float().cpu()
+        winner_i_only = semantic >= instance_i_only
+        winner_pi = semantic >= instance_pi
+        s_to_i = winner_i_only & ~winner_pi
+        i_to_s = ~winner_i_only & winner_pi
+        any_head_switch = (s_to_i | i_to_s).any(dim=0) & valid
+
+        pred_i_only = predictions['pi_native_p0_i1']
+        pred_full = predictions['pi_native_p1_i1']
+        class_flip = valid & (pred_i_only != pred_full)
+        improved = class_flip & (pred_full == gt) & (pred_i_only != gt)
+        harmed = class_flip & (pred_full != gt) & (pred_i_only == gt)
+        wrong_to_wrong = (
+            class_flip & (pred_full != gt) & (pred_i_only != gt))
+
+        def class_margin(value):
+            count = int(value.shape[0])
+            safe_gt = gt.clamp(0, count - 1)
+            gt_score = value.gather(
+                0, safe_gt.unsqueeze(0)).squeeze(0)
+            other = value.clone()
+            other.scatter_(0, safe_gt.unsqueeze(0), float('-inf'))
+            return gt_score - other.max(dim=0)[0]
+
+        margin_i_only = class_margin(logits['pi_native_p0_i1'])
+        margin_full = class_margin(logits['pi_native_p1_i1'])
+        margin_delta = margin_full - margin_i_only
+
+        def subset_mean(value, mask):
+            return (float(value[mask].mean().item())
+                    if mask.any() else None)
+
+        class_rows = []
+        added_support = mechanism_maps[
+            'admission_added_support'].detach().float().cpu() >= 0.5
+        removed_support = mechanism_maps[
+            'admission_removed_support'].detach().float().cpu() >= 0.5
+        for class_index, class_name in enumerate(self.class_names):
+            gt_class = valid & (gt == class_index)
+
+            def support_stats(support):
+                support = support[class_index] & valid
+                overlap = support & gt_class
+                return dict(
+                    pixels=int(support.sum().item()),
+                    gt_pixels=int(overlap.sum().item()),
+                    precision=_safe_div(
+                        int(overlap.sum().item()),
+                        int(support.sum().item())),
+                    gt_recall=_safe_div(
+                        int(overlap.sum().item()),
+                        int(gt_class.sum().item())),
+                )
+
+            added = support_stats(added_support)
+            removed = support_stats(removed_support)
+            class_rows.append(dict(
+                class_index=int(class_index),
+                class_name=class_name,
+                s_to_i_pixels=int((s_to_i[class_index] & valid).sum().item()),
+                s_to_i_gt_pixels=int((
+                    s_to_i[class_index] & gt_class).sum().item()),
+                i_to_s_pixels=int((i_to_s[class_index] & valid).sum().item()),
+                i_to_s_gt_pixels=int((
+                    i_to_s[class_index] & gt_class).sum().item()),
+                added_support_pixels=added['pixels'],
+                added_support_gt_pixels=added['gt_pixels'],
+                added_support_precision=added['precision'],
+                added_support_gt_recall=added['gt_recall'],
+                removed_support_pixels=removed['pixels'],
+                removed_support_gt_pixels=removed['gt_pixels'],
+                removed_support_precision=removed['precision'],
+                removed_support_gt_recall=removed['gt_recall'],
+            ))
+
+        return dict(
+            schema_version=PI_SCHEMA_VERSION,
+            protocol=PI_PROTOCOL,
+            presence_slot=int(self.role_prompt_tta_pi_presence_slot),
+            instance_slot=int(self.role_prompt_tta_pi_instance_slot),
+            variants=variant_stats,
+            mechanism=dict(
+                class_flip_pixels=int(class_flip.sum().item()),
+                improved_pixels=int(improved.sum().item()),
+                harmed_pixels=int(harmed.sum().item()),
+                wrong_to_wrong_pixels=int(wrong_to_wrong.sum().item()),
+                any_head_switch_pixels=int(any_head_switch.sum().item()),
+                class_flip_with_head_switch=int((
+                    class_flip & any_head_switch).sum().item()),
+                class_flip_without_head_switch=int((
+                    class_flip & ~any_head_switch).sum().item()),
+                improved_with_head_switch=int((
+                    improved & any_head_switch).sum().item()),
+                improved_without_head_switch=int((
+                    improved & ~any_head_switch).sum().item()),
+                harmed_with_head_switch=int((
+                    harmed & any_head_switch).sum().item()),
+                harmed_without_head_switch=int((
+                    harmed & ~any_head_switch).sum().item()),
+                mean_gt_margin_delta=subset_mean(margin_delta, valid),
+                corrected_gt_margin_delta=subset_mean(
+                    margin_delta, improved),
+                harmed_gt_margin_delta=subset_mean(margin_delta, harmed),
+                class_rows=class_rows,
+            ),
+        )
+
     def _rpt_record_image(
-            self, variant_logits, view_stats, data_sample, image_path):
+            self, variant_logits, view_stats, data_sample, image_path,
+            pi_variant_logits=None, pi_mechanism_maps=None):
         if not self.dump_role_prompt_tta_stats:
             return
         if data_sample is None or not hasattr(data_sample, 'gt_sem_seg'):
@@ -776,6 +1199,8 @@ class RoleFunctionalTextScreenMixin:
             variants=variant_stats,
             views=self._rpt_enrich_role_functional_stats_with_gt(
                 view_stats, gt),
+            pi_role_compatibility=self._rft_pi_record(
+                pi_variant_logits, pi_mechanism_maps, gt, valid),
         )
         self._rpt_write_stats(record)
         self._rpt_save_artifact(image_path, predictions, gt, valid)

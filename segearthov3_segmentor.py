@@ -51,6 +51,9 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
             role_prompt_tta_save_npz=False,
             role_prompt_tta_artifact_max_side=128,
             role_prompt_tta_max_saved_images=8,
+            role_prompt_tta_pi_diagnosis=False,
+            role_prompt_tta_pi_presence_slot=0,
+            role_prompt_tta_pi_instance_slot=0,
             **kwargs):
         super().__init__()
         self.device = _resolve_inference_device(device)
@@ -112,6 +115,12 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                 role_prompt_tta_artifact_max_side),
             role_prompt_tta_max_saved_images=(
                 role_prompt_tta_max_saved_images),
+            role_prompt_tta_pi_diagnosis=(
+                role_prompt_tta_pi_diagnosis),
+            role_prompt_tta_pi_presence_slot=(
+                role_prompt_tta_pi_presence_slot),
+            role_prompt_tta_pi_instance_slot=(
+                role_prompt_tta_pi_instance_slot),
         )
 
     def _get_instance_score(self, state, instance_index):
@@ -235,6 +244,24 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
             if return_components and self._uses_role_prompt_tta()
             else None)
         role_view_stats = [] if role_predictions is not None else None
+        pi_predictions = (
+            {
+                name: torch.zeros(
+                    (self.num_cls, image_height, image_width),
+                    dtype=torch.float32, device='cpu')
+                for name in self._rpt_pi_variant_names()
+            }
+            if role_predictions is not None
+            and self._rpt_uses_pi_diagnosis()
+            else None)
+        pi_mechanism_maps = (
+            {
+                name: torch.zeros(
+                    (self.num_cls, image_height, image_width),
+                    dtype=torch.float32, device='cpu')
+                for name in self._rpt_pi_mechanism_map_names()
+            }
+            if pi_predictions is not None else None)
 
         height_grids = (
             max(image_height - height_crop + height_stride - 1, 0)
@@ -274,6 +301,16 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                             role_predictions[name][:, y1:y2, x1:x2] += value
                         role_view_stats.extend(
                             crop_components['role_prompt_view_stats'])
+                        if pi_predictions is not None:
+                            for name, value in crop_components[
+                                    'role_prompt_pi_variant_class_logits'
+                            ].items():
+                                pi_predictions[name][:, y1:y2, x1:x2] += value
+                            for name, value in crop_components[
+                                    'role_prompt_pi_mechanism_class_maps'
+                            ].items():
+                                pi_mechanism_maps[name][
+                                    :, y1:y2, x1:x2] += value
 
         if torch.any(counts == 0):
             raise RuntimeError('Sparse sliding-window coverage.')
@@ -308,6 +345,23 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
             role_predictions['combo_p0_s0_i0'] = exact_baseline.clone()
             components['role_prompt_variant_class_logits'] = role_predictions
             components['role_prompt_view_stats'] = role_view_stats
+            if pi_predictions is not None:
+                for name in pi_predictions:
+                    pi_predictions[name] = (
+                        pi_predictions[name] / cpu_counts)
+                pi_anchor = pi_predictions['pi_native_p0_i0'].clone()
+                for name in pi_predictions:
+                    pi_predictions[name] = (
+                        exact_baseline + pi_predictions[name] - pi_anchor
+                    ).clamp(0.0, 1.0)
+                pi_predictions['pi_native_p0_i0'] = exact_baseline.clone()
+                for name in pi_mechanism_maps:
+                    pi_mechanism_maps[name] = (
+                        pi_mechanism_maps[name] / cpu_counts)
+                components['role_prompt_pi_variant_class_logits'] = (
+                    pi_predictions)
+                components['role_prompt_pi_mechanism_class_maps'] = (
+                    pi_mechanism_maps)
         return predictions, components
 
     def predict(self, inputs, data_samples):
@@ -362,6 +416,17 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                                 mode='bilinear',
                                 align_corners=False,
                             ).squeeze(0))
+                    if 'role_prompt_pi_variant_class_logits' in components:
+                        for field in (
+                                'role_prompt_pi_variant_class_logits',
+                                'role_prompt_pi_mechanism_class_maps'):
+                            for name, value in components[field].items():
+                                components[field][name] = F.interpolate(
+                                    value.unsqueeze(0),
+                                    size=original_shape,
+                                    mode='bilinear',
+                                    align_corners=False,
+                                ).squeeze(0)
 
             class_logits = self._aggregate_query_logits_to_classes(
                 query_logits)
@@ -375,6 +440,10 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                     components.get('role_prompt_view_stats', []),
                     data_sample,
                     image_path,
+                    pi_variant_logits=components.get(
+                        'role_prompt_pi_variant_class_logits'),
+                    pi_mechanism_maps=components.get(
+                        'role_prompt_pi_mechanism_class_maps'),
                 )
             data_sample.set_data({
                 'seg_logits': PixelData(data=class_logits),

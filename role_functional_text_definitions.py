@@ -6,6 +6,30 @@ import json
 PROTOCOL = 'role_functional_text_screen_v1'
 SCHEMA_VERSION = 1
 BANK_SCHEMA_VERSION = 1
+PI_PROTOCOL = 'pi_role_compatibility_v1'
+PI_SCHEMA_VERSION = 1
+
+PI_VARIANT_NAMES = (
+    'pi_native_p0_i0',
+    'pi_native_p1_i0',
+    'pi_native_p0_i1',
+    'pi_native_p1_i1',
+    'pi_freeze_admission_p1_i1',
+    'pi_freeze_amplitude_p1_i1',
+    'pi_hold_i_only_winner_p1_i1',
+    'pi_branch_once_p0_i0',
+    'pi_branch_once_p1_i0',
+    'pi_branch_once_p0_i1',
+    'pi_branch_once_p1_i1',
+)
+
+PI_MECHANISM_MAP_NAMES = (
+    'semantic_anchor',
+    'instance_i_only',
+    'instance_pi',
+    'admission_added_support',
+    'admission_removed_support',
+)
 
 ROLE_FIELDS = (
     ('presence', 'presence_candidates', 2),

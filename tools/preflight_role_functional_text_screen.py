@@ -13,6 +13,8 @@ if ROOT not in sys.path:
 
 from role_functional_text_definitions import (
     DEFAULT_SETTING,
+    PI_MECHANISM_MAP_NAMES,
+    PI_VARIANT_NAMES,
     PROTOCOL,
     RESIDUAL_SETTINGS,
     ROLE_FIELDS,
@@ -40,6 +42,7 @@ def static_checks():
         'role_functional_text_screen.py',
         'segearthov3_segmentor.py',
         'tools/summarize_role_functional_text_screen.py',
+        'tools/summarize_pi_role_compatibility.py',
     )
     for relative in sources:
         path = os.path.join(ROOT, relative)
@@ -74,6 +77,8 @@ def static_checks():
             config=os.path.relpath(config_path, ROOT),
         )
     assert len(set(VARIANT_NAMES)) == len(VARIANT_NAMES)
+    assert len(set(PI_VARIANT_NAMES)) == len(PI_VARIANT_NAMES)
+    assert len(set(PI_MECHANISM_MAP_NAMES)) == len(PI_MECHANISM_MAP_NAMES)
     assert DEFAULT_SETTING == 'alpha050_clip025'
     assert len(RESIDUAL_SETTINGS) == 5
     report['checks'] = [
@@ -84,6 +89,7 @@ def static_checks():
         'no-update role composition is checked against the exact baseline',
         'single-role, full-combination, shared-text and head-only maps exist',
         'five residual points separate alpha from clipping sensitivity',
+        'PI replays freeze admission, amplitude and head-winner sites',
         'RemoteCLIP, CLIP APIs, training and online candidate selection are absent',
     ]
     return report

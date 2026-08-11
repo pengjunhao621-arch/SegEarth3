@@ -2,7 +2,11 @@
 set -euo pipefail
 
 MODE="${1:-smoke}"
-ROOT="${ROOT:-logs/role_functional_text_screen_v1}"
+if [[ "${MODE}" == pi-* ]]; then
+    ROOT="${ROOT:-logs/pi_role_compatibility_v1}"
+else
+    ROOT="${ROOT:-logs/role_functional_text_screen_v1}"
+fi
 PYTHON_BIN="${PYTHON_BIN:-python}"
 GPU_LIST="${GPU_LIST:-0,1}"
 NPROC="${NPROC:-2}"
@@ -19,6 +23,19 @@ config_for() {
         potsdam) echo "configs/experiments/cfg_potsdam_role_functional_text_screen.py" ;;
         openearthmap) echo "configs/experiments/cfg_openearthmap_role_functional_text_screen.py" ;;
         loveda) echo "configs/experiments/cfg_loveda_role_functional_text_screen.py" ;;
+        *) echo "Unknown or excluded dataset: $1" >&2; return 2 ;;
+    esac
+}
+
+pi_slots_for() {
+    # Fixed from the completed factorial diagnosis; semantic stays at anchor.
+    case "$1" in
+        udd5) echo "1 2" ;;
+        vdd) echo "2 1" ;;
+        vaihingen) echo "1 1" ;;
+        potsdam) echo "1 2" ;;
+        openearthmap) echo "2 2" ;;
+        loveda) echo "1 1" ;;
         *) echo "Unknown or excluded dataset: $1" >&2; return 2 ;;
     esac
 }
@@ -53,7 +70,8 @@ run_eval() {
 
 collect() {
     local collection_mode="$1"
-    local dataset config out_dir existing
+    local experiment_mode="${2:-screen}"
+    local dataset config out_dir existing presence_slot instance_slot
     validate_datasets
     "${PYTHON_BIN}" tools/preflight_role_functional_text_screen.py \
         --check-runtime-assets
@@ -68,13 +86,25 @@ collect() {
             echo "Use a new ROOT or move the previous run first." >&2
             exit 2
         fi
-        echo "[role-functional-text-v1] ${dataset} -> ${out_dir}"
+        if [[ "${experiment_mode}" == "pi" ]]; then
+            echo "[pi-role-compatibility-v1] ${dataset} -> ${out_dir}"
+        else
+            echo "[role-functional-text-v1] ${dataset} -> ${out_dir}"
+        fi
         common_options=(
             model.role_prompt_tta_stats_path="${out_dir}/screen.jsonl"
             model.role_prompt_tta_primary_variant=baseline
             model.role_prompt_tta_integrity_tolerance="${INTEGRITY_TOLERANCE}"
             model.role_prompt_tta_save_npz=False
         )
+        if [[ "${experiment_mode}" == "pi" ]]; then
+            read -r presence_slot instance_slot <<< "$(pi_slots_for "${dataset}")"
+            common_options+=(
+                model.role_prompt_tta_pi_diagnosis=True
+                model.role_prompt_tta_pi_presence_slot="${presence_slot}"
+                model.role_prompt_tta_pi_instance_slot="${instance_slot}"
+            )
+        fi
         if [[ "${collection_mode}" == "smoke" ]]; then
             run_eval "${config}" "${out_dir}" \
                 --cfg-options \
@@ -90,6 +120,7 @@ collect() {
 }
 
 summarize() {
+    local experiment_mode="${1:-screen}"
     local inputs=()
     local path
     while IFS= read -r path; do
@@ -101,7 +132,11 @@ summarize() {
         exit 2
     fi
     mkdir -p "${ROOT}/summary"
-    "${PYTHON_BIN}" tools/summarize_role_functional_text_screen.py \
+    local summarizer="tools/summarize_role_functional_text_screen.py"
+    if [[ "${experiment_mode}" == "pi" ]]; then
+        summarizer="tools/summarize_pi_role_compatibility.py"
+    fi
+    "${PYTHON_BIN}" "${summarizer}" \
         --inputs "${inputs[@]}" \
         --out-dir "${ROOT}/summary" \
         --expected-datasets \
@@ -129,8 +164,22 @@ case "${MODE}" in
         collect full
         summarize
         ;;
+    pi-smoke)
+        collect smoke pi
+        summarize pi
+        ;;
+    pi-collect-all)
+        collect full pi
+        ;;
+    pi-summarize)
+        summarize pi
+        ;;
+    pi-all)
+        collect full pi
+        summarize pi
+        ;;
     *)
-        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all}" >&2
+        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all}" >&2
         exit 2
         ;;
 esac
