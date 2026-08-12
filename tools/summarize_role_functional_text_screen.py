@@ -710,14 +710,23 @@ def build_factorial_diagnosis(variant_rows, class_rows):
             baseline = class_lookup[(
                 dataset, class_index, 'baseline')]
 
-            def class_value(p, s, i):
-                value = class_lookup[(
+            # A smoke subset may contain neither GT nor predictions for a
+            # class, so IoU is mathematically undefined.  Such a class cannot
+            # support an additive factorial decomposition; keep its ordinary
+            # class row, but omit only this derived interaction table.
+            class_combo_values = {
+                (p, s, i): class_lookup[(
                     dataset, class_index,
                     combo_variant_name(p, s, i))]['iou']
-                if value is None:
-                    raise ValueError(
-                        f'{dataset}/{class_index}: undefined class IoU.')
-                return value
+                for p in range(3)
+                for s in range(4)
+                for i in range(3)
+            }
+            if any(value is None for value in class_combo_values.values()):
+                continue
+
+            def class_value(p, s, i):
+                return class_combo_values[(p, s, i)]
 
             for presence_slot in range(1, 3):
                 for semantic_slot in range(1, 4):
