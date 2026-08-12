@@ -8,6 +8,8 @@ SCHEMA_VERSION = 1
 BANK_SCHEMA_VERSION = 1
 PI_PROTOCOL = 'pi_role_compatibility_v1'
 PI_SCHEMA_VERSION = 1
+COMPLETION_PROTOCOL = 'role_text_completion_v1'
+COMPLETION_SCHEMA_VERSION = 1
 
 PI_VARIANT_NAMES = (
     'pi_native_p0_i0',
@@ -58,6 +60,12 @@ def combo_variant_name(presence_slot, semantic_slot, instance_slot):
 
 def sensitivity_variant_name(role, slot, setting):
     return f'sensitivity_{role}_{int(slot)}_{setting}'
+
+
+def completion_variant_name(presence_slot, semantic_slot, instance_slot):
+    return (
+        f'anchor_admission_p{int(presence_slot)}_s{int(semantic_slot)}_'
+        f'i{int(instance_slot)}')
 
 
 COMBINATION_VARIANTS = tuple(
@@ -183,6 +191,60 @@ def load_role_functional_text_bank(
                 'Prompt bank official_prompts do not exactly match the '
                 f'baseline class file. expected={expected}, '
                 f'observed={observed_official}.')
+
+    completion = payload.get('completion')
+    if completion is not None:
+        if not isinstance(completion, dict):
+            raise ValueError(f'Prompt bank {path} completion must be a dict.')
+        if completion.get('protocol') != COMPLETION_PROTOCOL:
+            raise ValueError(
+                f'Prompt bank {path} completion must declare protocol='
+                f'{COMPLETION_PROTOCOL!r}.')
+
+        def normalize_combination(value, field):
+            if (not isinstance(value, list) or len(value) != 3
+                    or any(not isinstance(slot, int) for slot in value)):
+                raise ValueError(f'{field} must be [P, S, I] integer slots.')
+            slots = tuple(int(slot) for slot in value)
+            limits = (2, 3, 2)
+            if any(slot < 0 or slot > limit
+                   for slot, limit in zip(slots, limits)):
+                raise ValueError(f'{field} has an out-of-range slot: {slots}.')
+            return slots
+
+        selected = normalize_combination(
+            completion.get('selected_combination'),
+            'completion.selected_combination')
+        requested = completion.get('anchor_admission_combinations')
+        if not isinstance(requested, list) or not requested:
+            raise ValueError(
+                'completion.anchor_admission_combinations must be non-empty.')
+        combinations = [
+            normalize_combination(value, 'anchor_admission_combinations')
+            for value in requested
+        ]
+        if len(set(combinations)) != len(combinations):
+            raise ValueError('Anchor-admission combinations contain duplicates.')
+        if selected not in combinations:
+            raise ValueError(
+                'selected_combination must have an anchor-admission control.')
+        requested_targets = completion.get('target_combinations', [])
+        if not isinstance(requested_targets, list):
+            raise ValueError('completion.target_combinations must be a list.')
+        targets = [
+            normalize_combination(value, 'target_combinations')
+            for value in requested_targets
+        ]
+        if len(set(targets)) != len(targets):
+            raise ValueError('Target combinations contain duplicates.')
+        if any(target not in combinations for target in targets):
+            raise ValueError(
+                'Every target combination needs an anchor-admission control.')
+        if any(not all(slot > 0 for slot in target) for target in targets):
+            raise ValueError('Every target combination must be all-nonzero.')
+        payload['_completion_selected'] = selected
+        payload['_completion_combinations'] = tuple(combinations)
+        payload['_completion_targets'] = tuple(targets)
 
     payload['_prompt_count'] = max(
         len(item['descriptions']) for item in classes)

@@ -15,6 +15,8 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from role_functional_text_definitions import (
+    COMPLETION_PROTOCOL,
+    COMPLETION_SCHEMA_VERSION,
     DEFAULT_SETTING,
     PROTOCOL,
     RESIDUAL_SETTINGS,
@@ -180,6 +182,7 @@ def summarize_dataset(dataset, records, tolerance):
         for view in record.get('views', []):
             for key in ('baseline_reconstruction_max_abs',
                         'no_update_identity_max_abs',
+                        'completion_noop_max_abs',
                         'native_recomposition_max_abs',
                         'diagnostic_cpu_bytes'):
                 integrity[key].append(view.get(key))
@@ -323,6 +326,7 @@ def summarize_dataset(dataset, records, tolerance):
     }
     for key in ('baseline_reconstruction_max_abs',
                 'no_update_identity_max_abs',
+                'completion_noop_max_abs',
                 'native_recomposition_max_abs'):
         if maxima.get(key, 0.0) > tolerance:
             raise ValueError(
@@ -422,6 +426,169 @@ def build_interaction_rows(variant_rows):
                             additive > 0.0 and delta < additive),
                     ))
     return output
+
+
+def build_completion_rows(records, variant_rows):
+    """Aggregate native versus anchor-admission for requested combinations."""
+    grouped = defaultdict(list)
+    for record in records:
+        completion = record.get('role_text_completion')
+        if completion is not None:
+            grouped[str(record['dataset_name']).lower()].append(completion)
+    if not grouped:
+        return [], []
+
+    official = {
+        row['dataset']: row for row in variant_rows
+        if row['variant'] == 'baseline'
+    }
+    rows, class_rows = [], []
+    for dataset, payloads in sorted(grouped.items()):
+        first = payloads[0]
+        if (int(first.get('schema_version', -1)) != COMPLETION_SCHEMA_VERSION
+                or first.get('protocol') != COMPLETION_PROTOCOL):
+            raise ValueError(f'{dataset}: completion protocol/schema mismatch.')
+        selected = tuple(first['selected_combination'])
+        targets = {tuple(value) for value in first.get(
+            'target_combinations', [])}
+        names = tuple(first.get('variants', {}))
+        native_matrices = {name: None for name in names}
+        admission_matrices = {name: None for name in names}
+        counters = {name: defaultdict(int) for name in names}
+        slots = {}
+        for payload in payloads:
+            if (tuple(payload.get('selected_combination', ())) != selected
+                    or {tuple(value) for value in payload.get(
+                        'target_combinations', [])} != targets
+                    or tuple(payload.get('variants', {})) != names):
+                raise ValueError(
+                    f'{dataset}: completion contract changed within a run.')
+            for name, values in payload['variants'].items():
+                slots[name] = tuple(values['slots'])
+                native_matrices[name] = add_matrix(
+                    native_matrices[name],
+                    values['native_confusion']['matrix'])
+                admission_matrices[name] = add_matrix(
+                    admission_matrices[name],
+                    values['anchor_admission_confusion']['matrix'])
+                for field in ('changed_pixels', 'improved_pixels',
+                              'harmed_pixels', 'help_minus_harm'):
+                    counters[name][field] += int(values.get(field, 0))
+
+        for name in names:
+            native = confusion_metrics(native_matrices[name])
+            admission = confusion_metrics(admission_matrices[name])
+            p_slot, s_slot, i_slot = slots[name]
+            base_miou = float(official[dataset]['miou'])
+            rows.append(dict(
+                dataset=dataset,
+                variant=name,
+                presence_slot=p_slot,
+                semantic_slot=s_slot,
+                instance_slot=i_slot,
+                is_current_selected=(slots[name] == selected),
+                is_target_completion=(slots[name] in targets),
+                is_all_nonzero=all(value > 0 for value in slots[name]),
+                images=len(payloads),
+                official_miou=base_miou,
+                native_miou=native['miou'],
+                native_delta_to_official=native['miou'] - base_miou,
+                anchor_admission_miou=admission['miou'],
+                anchor_admission_delta_to_official=(
+                    admission['miou'] - base_miou),
+                anchor_admission_delta_to_native=(
+                    admission['miou'] - native['miou']),
+                changed_pixels=counters[name]['changed_pixels'],
+                improved_pixels=counters[name]['improved_pixels'],
+                harmed_pixels=counters[name]['harmed_pixels'],
+                help_minus_harm=counters[name]['help_minus_harm'],
+            ))
+            for class_index, class_name in enumerate(
+                    next(record['class_names'] for record in records
+                         if str(record['dataset_name']).lower() == dataset)):
+                native_iou = native['iou'][class_index]
+                admission_iou = admission['iou'][class_index]
+                class_rows.append(dict(
+                    dataset=dataset,
+                    variant=name,
+                    presence_slot=p_slot,
+                    semantic_slot=s_slot,
+                    instance_slot=i_slot,
+                    is_current_selected=(slots[name] == selected),
+                    class_index=class_index,
+                    class_name=class_name,
+                    native_iou=(None if native_iou is None
+                                else 100.0 * native_iou),
+                    anchor_admission_iou=(
+                        None if admission_iou is None
+                        else 100.0 * admission_iou),
+                    anchor_admission_delta_iou=(
+                        None if native_iou is None or admission_iou is None
+                        else 100.0 * (admission_iou - native_iou)),
+                ))
+    return rows, class_rows
+
+
+def write_completion_markdown(path, rows):
+    datasets = sorted({row['dataset'] for row in rows})
+    lines = [
+        '# Role-text completion and anchor-admission screen', '',
+        '## Current selected combination', '',
+        '| Dataset | Combination | Native mIoU | Anchor-admission mIoU | '
+        'Admission delta |',
+        '|---|---|---:|---:|---:|',
+    ]
+    for dataset in datasets:
+        row = next(item for item in rows
+                   if item['dataset'] == dataset
+                   and item['is_current_selected'])
+        slots = (row['presence_slot'], row['semantic_slot'],
+                 row['instance_slot'])
+        lines.append(
+            f"| {dataset} | P{slots[0]}+S{slots[1]}+I{slots[2]} | "
+            f"{row['native_miou']:.3f} | "
+            f"{row['anchor_admission_miou']:.3f} | "
+            f"{row['anchor_admission_delta_to_native']:+.3f} |")
+    lines.extend([
+        '', '## Best all-nonzero completion candidate', '',
+        '| Dataset | Best native | Delta to official | Best with anchor '
+        'admission | Delta to official | Target vs current best |',
+        '|---|---|---:|---|---:|---:|',
+    ])
+    for dataset in datasets:
+        candidates = [row for row in rows
+                      if row['dataset'] == dataset
+                      and row['is_all_nonzero']]
+        if not candidates:
+            continue
+        native = max(candidates, key=lambda row: row['native_miou'])
+        admission = max(
+            candidates, key=lambda row: row['anchor_admission_miou'])
+        selected = next(row for row in rows
+                        if row['dataset'] == dataset
+                        and row['is_current_selected'])
+        targets = [row for row in candidates
+                   if row['is_target_completion']]
+        target_best = max(
+            [value for row in targets for value in (
+                row['native_miou'], row['anchor_admission_miou'])],
+            default=None)
+
+        def label(row):
+            return (f"P{row['presence_slot']}+S{row['semantic_slot']}+"
+                    f"I{row['instance_slot']}")
+
+        lines.append(
+            f"| {dataset} | {label(native)} "
+            f"({native['native_miou']:.3f}) | "
+            f"{native['native_delta_to_official']:+.3f} | "
+            f"{label(admission)} "
+            f"({admission['anchor_admission_miou']:.3f}) | "
+            f"{admission['anchor_admission_delta_to_official']:+.3f} | "
+            + ("n/a |" if target_best is None else
+               f"{target_best - selected['native_miou']:+.3f} |"))
+    with open(path, 'w', encoding='utf-8') as handle:
+        handle.write('\n'.join(lines) + '\n')
 
 
 def _factorial_components(value_at, presence_slot, semantic_slot,
@@ -748,6 +915,8 @@ def main():
     interaction_rows = build_interaction_rows(variant_rows)
     factorial_rows, class_factorial_rows, interaction_summary_rows = (
         build_factorial_diagnosis(variant_rows, class_rows))
+    completion_rows, completion_class_rows = build_completion_rows(
+        records, variant_rows)
 
     os.makedirs(args.out_dir, exist_ok=True)
     write_csv(os.path.join(args.out_dir, 'dataset_variants.csv'), variant_rows)
@@ -765,6 +934,10 @@ def main():
     write_csv(os.path.join(args.out_dir, 'role_interaction_summary.csv'),
               interaction_summary_rows)
     write_csv(os.path.join(args.out_dir, 'integrity_and_memory.csv'), controls)
+    write_csv(os.path.join(args.out_dir, 'completion_variants.csv'),
+              completion_rows)
+    write_csv(os.path.join(args.out_dir, 'completion_class_variants.csv'),
+              completion_class_rows)
     payload = dict(
         protocol=PROTOCOL,
         records=len(records),
@@ -780,6 +953,8 @@ def main():
         factorial_class_interactions=class_factorial_rows,
         role_interaction_summary=interaction_summary_rows,
         controls=controls,
+        completion_variants=completion_rows,
+        completion_class_variants=completion_class_rows,
     )
     with open(os.path.join(args.out_dir, 'summary.json'), 'w',
               encoding='utf-8') as handle:
@@ -790,6 +965,10 @@ def main():
     write_interaction_markdown(
         os.path.join(args.out_dir, 'interaction_diagnosis.md'),
         factorial_rows, interaction_summary_rows)
+    if completion_rows:
+        write_completion_markdown(
+            os.path.join(args.out_dir, 'completion_summary.md'),
+            completion_rows)
 
 
 if __name__ == '__main__':

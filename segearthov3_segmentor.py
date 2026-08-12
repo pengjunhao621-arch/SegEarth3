@@ -54,6 +54,7 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
             role_prompt_tta_pi_diagnosis=False,
             role_prompt_tta_pi_presence_slot=0,
             role_prompt_tta_pi_instance_slot=0,
+            role_prompt_tta_completion_diagnosis=False,
             **kwargs):
         super().__init__()
         self.device = _resolve_inference_device(device)
@@ -121,6 +122,8 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                 role_prompt_tta_pi_presence_slot),
             role_prompt_tta_pi_instance_slot=(
                 role_prompt_tta_pi_instance_slot),
+            role_prompt_tta_completion_diagnosis=(
+                role_prompt_tta_completion_diagnosis),
         )
 
     def _get_instance_score(self, state, instance_index):
@@ -262,6 +265,16 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                 for name in self._rpt_pi_mechanism_map_names()
             }
             if pi_predictions is not None else None)
+        completion_predictions = (
+            {
+                name: torch.zeros(
+                    (self.num_cls, image_height, image_width),
+                    dtype=torch.float32, device='cpu')
+                for name in self._rpt_completion_variant_names()
+            }
+            if role_predictions is not None
+            and self._rpt_uses_completion_diagnosis()
+            else None)
 
         height_grids = (
             max(image_height - height_crop + height_stride - 1, 0)
@@ -310,6 +323,12 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                                     'role_prompt_pi_mechanism_class_maps'
                             ].items():
                                 pi_mechanism_maps[name][
+                                    :, y1:y2, x1:x2] += value
+                        if completion_predictions is not None:
+                            for name, value in crop_components[
+                                    'role_prompt_completion_variant_class_logits'
+                            ].items():
+                                completion_predictions[name][
                                     :, y1:y2, x1:x2] += value
 
         if torch.any(counts == 0):
@@ -362,6 +381,16 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                     pi_predictions)
                 components['role_prompt_pi_mechanism_class_maps'] = (
                     pi_mechanism_maps)
+            if completion_predictions is not None:
+                for name in completion_predictions:
+                    completion_predictions[name] = (
+                        exact_baseline
+                        + completion_predictions[name] / cpu_counts
+                        - crop_anchor
+                    ).clamp(0.0, 1.0)
+                components[
+                    'role_prompt_completion_variant_class_logits'] = (
+                        completion_predictions)
         return predictions, components
 
     def predict(self, inputs, data_samples):
@@ -427,6 +456,19 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                                     mode='bilinear',
                                     align_corners=False,
                                 ).squeeze(0)
+                    if ('role_prompt_completion_variant_class_logits'
+                            in components):
+                        for name, value in components[
+                                'role_prompt_completion_variant_class_logits'
+                        ].items():
+                            components[
+                                'role_prompt_completion_variant_class_logits'
+                            ][name] = F.interpolate(
+                                value.unsqueeze(0),
+                                size=original_shape,
+                                mode='bilinear',
+                                align_corners=False,
+                            ).squeeze(0)
 
             class_logits = self._aggregate_query_logits_to_classes(
                 query_logits)
@@ -444,6 +486,8 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                         'role_prompt_pi_variant_class_logits'),
                     pi_mechanism_maps=components.get(
                         'role_prompt_pi_mechanism_class_maps'),
+                    completion_variant_logits=components.get(
+                        'role_prompt_completion_variant_class_logits'),
                 )
             data_sample.set_data({
                 'seg_logits': PixelData(data=class_logits),

@@ -2,7 +2,9 @@
 set -euo pipefail
 
 MODE="${1:-smoke}"
-if [[ "${MODE}" == pi-* ]]; then
+if [[ "${MODE}" == completion-* ]]; then
+    ROOT="${ROOT:-logs/role_text_completion_v1}"
+elif [[ "${MODE}" == pi-* ]]; then
     ROOT="${ROOT:-logs/pi_role_compatibility_v1}"
 else
     ROOT="${ROOT:-logs/role_functional_text_screen_v1}"
@@ -88,6 +90,8 @@ collect() {
         fi
         if [[ "${experiment_mode}" == "pi" ]]; then
             echo "[pi-role-compatibility-v1] ${dataset} -> ${out_dir}"
+        elif [[ "${experiment_mode}" == "completion" ]]; then
+            echo "[role-text-completion-v1] ${dataset} -> ${out_dir}"
         else
             echo "[role-functional-text-v1] ${dataset} -> ${out_dir}"
         fi
@@ -103,6 +107,11 @@ collect() {
                 model.role_prompt_tta_pi_diagnosis=True
                 model.role_prompt_tta_pi_presence_slot="${presence_slot}"
                 model.role_prompt_tta_pi_instance_slot="${instance_slot}"
+            )
+        elif [[ "${experiment_mode}" == "completion" ]]; then
+            common_options+=(
+                model.role_prompt_tta_prompt_bank="configs/prompt_banks/role_functional_text_v2/${dataset}.json"
+                model.role_prompt_tta_completion_diagnosis=True
             )
         fi
         if [[ "${collection_mode}" == "smoke" ]]; then
@@ -178,8 +187,22 @@ case "${MODE}" in
         collect full pi
         summarize pi
         ;;
+    completion-smoke)
+        collect smoke completion
+        summarize completion
+        ;;
+    completion-collect-all)
+        collect full completion
+        ;;
+    completion-summarize)
+        summarize completion
+        ;;
+    completion-all)
+        collect full completion
+        summarize completion
+        ;;
     *)
-        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all}" >&2
+        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all|completion-smoke|completion-collect-all|completion-summarize|completion-all}" >&2
         exit 2
         ;;
 esac

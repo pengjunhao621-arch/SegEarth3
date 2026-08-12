@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "protocol": "role_functional_text_screen_v1",
+  "dataset": "Potsdam",
+  "generator": "Codex; completion candidates frozen before evaluation",
+  "frozen_before_evaluation": true,
+  "completion": {"protocol": "role_text_completion_v1", "selected_combination": [1, 2, 0], "target_combinations": [[1, 2, 1], [1, 2, 2]], "anchor_admission_combinations": [[1, 2, 0], [1, 1, 1], [1, 1, 2], [1, 2, 1], [1, 2, 2], [1, 3, 1], [1, 3, 2], [2, 1, 1], [2, 1, 2], [2, 2, 1], [2, 2, 2], [2, 3, 1], [2, 3, 2]]},
+  "classes": [
+    {"id": 0, "name": "road", "official_prompts": ["road"], "presence_candidates": ["roads", "impervious surface"], "semantic_candidates": ["elongated road surface", "continuous road surface", "paved road surface"], "instance_candidates": ["complete connected road network", "one continuous impervious-surface component"]},
+    {"id": 1, "name": "building", "official_prompts": ["building"], "presence_candidates": ["buildings", "built structure"], "semantic_candidates": ["polygonal building footprint", "rectilinear building", "overhead building roof"], "instance_candidates": ["complete rooftop footprint", "one detached building region"]},
+    {"id": 2, "name": "grass", "official_prompts": ["grass"], "presence_candidates": ["grass cover", "low vegetation"], "semantic_candidates": ["low grass cover", "smooth grass surface", "homogeneous grass region"], "instance_candidates": ["complete low-vegetation patch", "one contiguous grassy area"]},
+    {"id": 3, "name": "tree", "official_prompts": ["tree"], "presence_candidates": ["trees", "tree cover"], "semantic_candidates": ["textured tree canopy", "irregular tree crown", "dense tree canopy"], "instance_candidates": ["complete tree crown", "one distinct canopy region"]},
+    {"id": 4, "name": "car", "official_prompts": ["car"], "presence_candidates": ["cars", "automobile"], "semantic_candidates": ["compact car", "small car", "rectangular car roof"], "instance_candidates": ["complete car footprint", "one distinct vehicle object"]},
+    {"id": 5, "name": "clutter", "official_prompts": ["clutter"], "presence_candidates": ["background clutter", "miscellaneous clutter"], "semantic_candidates": ["mixed clutter", "irregular clutter region", "miscellaneous clutter region"], "instance_candidates": ["complete unclassified object", "one bounded miscellaneous region"]}
+  ]
+}

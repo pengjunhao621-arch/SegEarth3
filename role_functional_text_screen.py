@@ -10,6 +10,8 @@ import torch
 import torch.nn.functional as F
 
 from role_functional_text_definitions import (
+    COMPLETION_PROTOCOL,
+    COMPLETION_SCHEMA_VERSION,
     DEFAULT_SETTING,
     PI_MECHANISM_MAP_NAMES,
     PI_PROTOCOL,
@@ -21,6 +23,7 @@ from role_functional_text_definitions import (
     SCHEMA_VERSION,
     VARIANT_NAMES,
     combo_variant_name,
+    completion_variant_name,
     load_role_functional_text_bank,
     reference_variant,
     sensitivity_variant_name,
@@ -75,6 +78,7 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_pi_diagnosis=False,
             role_prompt_tta_pi_presence_slot=0,
             role_prompt_tta_pi_instance_slot=0,
+            role_prompt_tta_completion_diagnosis=False,
             **kwargs):
         self.use_role_prompt_tta = bool(use_role_prompt_tta)
         self.dump_role_prompt_tta_stats = bool(dump_role_prompt_tta_stats)
@@ -100,6 +104,8 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_pi_presence_slot)
         self.role_prompt_tta_pi_instance_slot = int(
             role_prompt_tta_pi_instance_slot)
+        self.role_prompt_tta_completion_diagnosis = bool(
+            role_prompt_tta_completion_diagnosis)
         self._role_prompt_tta_stats_file = None
         self._role_prompt_tta_saved_images = 0
         self._rpt_text_cache = None
@@ -139,6 +145,10 @@ class RoleFunctionalTextScreenMixin:
             self.class_names,
             official_prompts,
         )
+        if (self.role_prompt_tta_completion_diagnosis
+                and '_completion_combinations' not in self._rpt_prompt_bank):
+            raise ValueError(
+                'Completion diagnosis requires prompt-bank completion metadata.')
         for parameter in self.processor.model.parameters():
             parameter.requires_grad_(False)
 
@@ -146,7 +156,8 @@ class RoleFunctionalTextScreenMixin:
         return bool(
             getattr(self, 'use_role_prompt_tta', False)
             or getattr(self, 'dump_role_prompt_tta_stats', False)
-            or getattr(self, 'role_prompt_tta_pi_diagnosis', False))
+            or getattr(self, 'role_prompt_tta_pi_diagnosis', False)
+            or getattr(self, 'role_prompt_tta_completion_diagnosis', False))
 
     @staticmethod
     def _rpt_uses_class_space_variants():
@@ -154,6 +165,17 @@ class RoleFunctionalTextScreenMixin:
 
     def _rpt_uses_pi_diagnosis(self):
         return bool(getattr(self, 'role_prompt_tta_pi_diagnosis', False))
+
+    def _rpt_uses_completion_diagnosis(self):
+        return bool(getattr(
+            self, 'role_prompt_tta_completion_diagnosis', False))
+
+    def _rpt_completion_variant_names(self):
+        if not self._rpt_uses_completion_diagnosis():
+            return ()
+        return tuple(
+            completion_variant_name(*slots)
+            for slots in self._rpt_prompt_bank['_completion_combinations'])
 
     @staticmethod
     def _rpt_variant_names():
@@ -633,6 +655,13 @@ class RoleFunctionalTextScreenMixin:
                     (self.num_cls, height, width), dtype=torch.float32,
                     device='cpu'))
                 for name in PI_MECHANISM_MAP_NAMES)
+        completion_variants = None
+        if self._rpt_uses_completion_diagnosis():
+            completion_variants = OrderedDict(
+                (name, torch.empty(
+                    (self.num_cls, height, width), dtype=torch.float32,
+                    device='cpu'))
+                for name in self._rpt_completion_variant_names())
         settings = {
             name: (float(alpha), float(clip))
             for name, alpha, clip in RESIDUAL_SETTINGS
@@ -654,13 +683,19 @@ class RoleFunctionalTextScreenMixin:
             anchor_semantic = anchor['semantic'].float()
             instance_cache = {}
 
-            def instance_for(package, presence):
-                key = (id(package), float(torch.as_tensor(
-                    presence).float().item()))
+            def instance_for(package, presence, admission_presence=None):
+                amplitude_value = float(torch.as_tensor(
+                    presence).float().item())
+                admission_value = float(torch.as_tensor(
+                    presence if admission_presence is None
+                    else admission_presence).float().item())
+                key = (id(package), amplitude_value, admission_value)
                 if key not in instance_cache:
                     instance_cache[key] = (
                         self._rpt_head_role_instance_from_raw(
-                            package, presence, output_shape))
+                            package, presence, output_shape,
+                            admission_presence=admission_presence,
+                            amplitude_presence=presence))
                 return instance_cache[key]
 
             anchor_instance, anchor_kept = instance_for(
@@ -771,7 +806,8 @@ class RoleFunctionalTextScreenMixin:
                 ))
 
             def compose(presence_slot=0, semantic_slot=0, instance_slot=0,
-                        setting=DEFAULT_SETTING, shared_package=None):
+                        setting=DEFAULT_SETTING, shared_package=None,
+                        anchor_admission=False):
                 alpha, clip = settings[setting]
                 presence_package = shared_package or (
                     role_packages['presence'][presence_slot]
@@ -792,11 +828,14 @@ class RoleFunctionalTextScreenMixin:
                     semantic, _ = self._rft_bounded(
                         anchor_semantic, semantic_package['semantic'],
                         alpha, clip)
-                base_instance, _ = instance_for(anchor, presence)
+                admission_presence = (
+                    anchor_presence if anchor_admission else presence)
+                base_instance, _ = instance_for(
+                    anchor, presence, admission_presence)
                 instance = base_instance
                 if instance_package is not None:
                     candidate_instance, _ = instance_for(
-                        instance_package, presence)
+                        instance_package, presence, admission_presence)
                     instance, _ = self._rft_bounded(
                         base_instance, candidate_instance, alpha, clip)
                 role_final = self._rft_role_final(
@@ -813,6 +852,12 @@ class RoleFunctionalTextScreenMixin:
                             presence_slot, semantic_slot, instance_slot)
                         variants[name][class_index].copy_(compose(
                             presence_slot, semantic_slot, instance_slot))
+            if completion_variants is not None:
+                for slots in self._rpt_prompt_bank[
+                        '_completion_combinations']:
+                    name = completion_variant_name(*slots)
+                    completion_variants[name][class_index].copy_(compose(
+                        *slots, anchor_admission=True))
             for role, _, count in ROLE_FIELDS:
                 for slot in range(1, count + 1):
                     for setting, _, _ in RESIDUAL_SETTINGS:
@@ -863,17 +908,32 @@ class RoleFunctionalTextScreenMixin:
                 pi_variants[pi_name] - variants[combo_name]
             ).abs().max().item()) for pi_name, combo_name in replay_pairs)
         recomposition_error = max(recomposition_errors or [0.0])
+        completion_noop_error = 0.0
+        if completion_variants is not None:
+            completion_noop_error = max([
+                float((completion_variants[completion_variant_name(*slots)]
+                       - variants[combo_variant_name(*slots)]
+                       ).abs().max().item())
+                for slots in self._rpt_prompt_bank['_completion_combinations']
+                if slots[0] == 0
+            ] or [0.0])
         if tuple(variants) != VARIANT_NAMES:
             raise RuntimeError('Role-functional variant order drifted.')
+        if (completion_variants is not None
+                and tuple(completion_variants)
+                != self._rpt_completion_variant_names()):
+            raise RuntimeError('Completion variant order drifted.')
         if (self.role_prompt_tta_strict_integrity
                 and max(identity_error, recomposition_error,
-                        pi_identity_error, pi_replay_match_error)
+                        pi_identity_error, pi_replay_match_error,
+                        completion_noop_error)
                 > self.role_prompt_tta_integrity_tolerance):
             raise RuntimeError(
                 'Role-functional integrity failed: '
                 f'identity={identity_error}, '
                 f'pi_identity={pi_identity_error}, '
                 f'pi_replay_match={pi_replay_match_error}, '
+                f'completion_noop={completion_noop_error}, '
                 f'native_recomposition={recomposition_error}.')
 
         view_stats = dict(
@@ -889,13 +949,17 @@ class RoleFunctionalTextScreenMixin:
             no_update_identity_max_abs=identity_error,
             pi_no_update_identity_max_abs=pi_identity_error,
             pi_replay_match_max_abs=pi_replay_match_error,
+            completion_noop_max_abs=completion_noop_error,
             native_recomposition_max_abs=recomposition_error,
             official_query_count=int(self.num_queries),
             canonical_class_count=int(self.num_cls),
-            diagnostic_variant_count=len(variants),
+            diagnostic_variant_count=(
+                len(variants) + len(completion_variants or {})),
             diagnostic_cpu_bytes=int(sum(
                 value.numel() * value.element_size()
-                for value in variants.values())),
+                for value in variants.values()) + sum(
+                    value.numel() * value.element_size()
+                    for value in (completion_variants or {}).values())),
             default_residual_setting=DEFAULT_SETTING,
             residual_settings=[
                 dict(name=name, alpha=alpha, clip=clip)
@@ -912,6 +976,19 @@ class RoleFunctionalTextScreenMixin:
                         self.role_prompt_tta_pi_instance_slot),
                     query_rows=pi_query_rows,
                 ) if pi_variants is not None else None),
+            completion_diagnosis=(
+                dict(
+                    schema_version=COMPLETION_SCHEMA_VERSION,
+                    protocol=COMPLETION_PROTOCOL,
+                    selected_combination=list(
+                        self._rpt_prompt_bank['_completion_selected']),
+                    anchor_admission_combinations=[
+                        list(value) for value in self._rpt_prompt_bank[
+                            '_completion_combinations']],
+                    target_combinations=[
+                        list(value) for value in self._rpt_prompt_bank[
+                            '_completion_targets']],
+                ) if completion_variants is not None else None),
             cuda_memory=dict(main=_cuda_memory_snapshot(self.device)),
         )
         primary = baseline_query['final'].to(self.device)
@@ -925,6 +1002,9 @@ class RoleFunctionalTextScreenMixin:
             components['role_prompt_pi_variant_class_logits'] = pi_variants
             components['role_prompt_pi_mechanism_class_maps'] = (
                 pi_mechanism_maps)
+        if completion_variants is not None:
+            components['role_prompt_completion_variant_class_logits'] = (
+                completion_variants)
         stats = dict(
             view_id=view_id,
             crop_box=crop_box,
@@ -1135,9 +1215,54 @@ class RoleFunctionalTextScreenMixin:
             ),
         )
 
+    def _rft_completion_record(
+            self, completion_variant_logits, variant_logits, gt, valid):
+        if completion_variant_logits is None:
+            return None
+        expected = self._rpt_completion_variant_names()
+        if tuple(completion_variant_logits) != expected:
+            raise RuntimeError('Recorded completion variants drifted.')
+        rows = OrderedDict()
+        for slots, name in zip(
+                self._rpt_prompt_bank['_completion_combinations'], expected):
+            native_name = combo_variant_name(*slots)
+            native_prediction = self._rpt_threshold(
+                variant_logits[native_name].detach().float().cpu()
+            ).to(torch.int16)
+            prediction = self._rpt_threshold(
+                completion_variant_logits[name].detach().float().cpu()
+            ).to(torch.int16)
+            changed = valid & (prediction != native_prediction)
+            improved = changed & (prediction == gt) & (native_prediction != gt)
+            harmed = changed & (prediction != gt) & (native_prediction == gt)
+            rows[name] = dict(
+                slots=list(slots),
+                native_variant=native_name,
+                native_confusion=self._rpt_confusion(
+                    native_prediction, gt, valid),
+                anchor_admission_confusion=self._rpt_confusion(
+                    prediction, gt, valid),
+                changed_pixels=int(changed.sum().item()),
+                improved_pixels=int(improved.sum().item()),
+                harmed_pixels=int(harmed.sum().item()),
+                help_minus_harm=(int(improved.sum().item())
+                                 - int(harmed.sum().item())),
+            )
+        return dict(
+            schema_version=COMPLETION_SCHEMA_VERSION,
+            protocol=COMPLETION_PROTOCOL,
+            selected_combination=list(
+                self._rpt_prompt_bank['_completion_selected']),
+            target_combinations=[
+                list(value) for value in self._rpt_prompt_bank[
+                    '_completion_targets']],
+            variants=rows,
+        )
+
     def _rpt_record_image(
             self, variant_logits, view_stats, data_sample, image_path,
-            pi_variant_logits=None, pi_mechanism_maps=None):
+            pi_variant_logits=None, pi_mechanism_maps=None,
+            completion_variant_logits=None):
         if not self.dump_role_prompt_tta_stats:
             return
         if data_sample is None or not hasattr(data_sample, 'gt_sem_seg'):
@@ -1201,6 +1326,8 @@ class RoleFunctionalTextScreenMixin:
                 view_stats, gt),
             pi_role_compatibility=self._rft_pi_record(
                 pi_variant_logits, pi_mechanism_maps, gt, valid),
+            role_text_completion=self._rft_completion_record(
+                completion_variant_logits, variant_logits, gt, valid),
         )
         self._rpt_write_stats(record)
         self._rpt_save_artifact(image_path, predictions, gt, valid)

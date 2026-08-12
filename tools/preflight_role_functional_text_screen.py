@@ -12,6 +12,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from role_functional_text_definitions import (
+    COMPLETION_PROTOCOL,
     DEFAULT_SETTING,
     PI_MECHANISM_MAP_NAMES,
     PI_VARIANT_NAMES,
@@ -78,6 +79,14 @@ def static_checks():
             bank=os.path.relpath(bank_path, ROOT),
             config=os.path.relpath(config_path, ROOT),
         )
+        completion_bank_path = os.path.join(
+            ROOT, 'configs', 'prompt_banks', 'role_functional_text_v2',
+            f'{dataset}.json')
+        completion_bank = load_role_functional_text_bank(
+            completion_bank_path, names, official)
+        assert completion_bank['completion']['protocol'] == COMPLETION_PROTOCOL
+        report['datasets'][dataset]['completion_bank'] = os.path.relpath(
+            completion_bank_path, ROOT)
     assert len(set(VARIANT_NAMES)) == len(VARIANT_NAMES)
     assert len(set(PI_VARIANT_NAMES)) == len(PI_VARIANT_NAMES)
     assert len(set(PI_MECHANISM_MAP_NAMES)) == len(PI_MECHANISM_MAP_NAMES)
@@ -92,6 +101,8 @@ def static_checks():
         'single-role, full-combination, shared-text and head-only maps exist',
         'five residual points separate alpha from clipping sensitivity',
         'PI replays freeze admission, amplitude and head-winner sites',
+        'completion banks define selected and anchor-admission combinations',
+        'P0 completion controls are required to equal native admission',
         'RemoteCLIP, CLIP APIs, training and online candidate selection are absent',
     ]
     return report

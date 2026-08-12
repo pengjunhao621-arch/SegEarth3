@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "protocol": "role_functional_text_screen_v1",
+  "dataset": "OpenEarthMap",
+  "generator": "Codex; completion candidates frozen before evaluation",
+  "frozen_before_evaluation": true,
+  "completion": {"protocol": "role_text_completion_v1", "selected_combination": [0, 0, 2], "target_combinations": [[1, 1, 2], [1, 2, 2], [1, 3, 2], [2, 1, 2], [2, 2, 2], [2, 3, 2]], "anchor_admission_combinations": [[0, 0, 2], [1, 1, 1], [1, 1, 2], [1, 2, 1], [1, 2, 2], [1, 3, 1], [1, 3, 2], [2, 1, 1], [2, 1, 2], [2, 2, 1], [2, 2, 2], [2, 3, 1], [2, 3, 2]]},
+  "classes": [
+    {"id": 0, "name": "background", "official_prompts": ["background"], "presence_candidates": ["other land cover", "unclassified area"], "semantic_candidates": ["unclassified mixed pixels", "remaining unlabeled image area", "miscellaneous non-target land cover"], "instance_candidates": ["background region", "miscellaneous background area"]},
+    {"id": 1, "name": "bareland", "official_prompts": ["bareland", "barren"], "presence_candidates": ["bare ground", "non-vegetated land"], "semantic_candidates": ["exposed soil surface", "continuous bare-ground area", "non-vegetated earthen ground"], "instance_candidates": ["bareland patch", "connected barren region"]},
+    {"id": 2, "name": "grass", "official_prompts": ["grass"], "presence_candidates": ["lawn", "herbaceous vegetation"], "semantic_candidates": ["fine-textured low vegetation", "continuous grassy cover", "herbaceous ground vegetation"], "instance_candidates": ["grass patch", "connected grass region"]},
+    {"id": 3, "name": "pavement", "official_prompts": ["pavement"], "presence_candidates": ["paved area", "hardscape"], "semantic_candidates": ["smooth paved surface", "compact impervious paved area", "non-road hardscape pavement"], "instance_candidates": ["pavement patch", "connected pavement region"]},
+    {"id": 4, "name": "road", "official_prompts": ["road"], "presence_candidates": ["road network", "vehicular road"], "semantic_candidates": ["linear paved roadway surface", "connected road network", "vehicular traffic surface"], "instance_candidates": ["connected road segment", "continuous road region"]},
+    {"id": 5, "name": "tree", "official_prompts": ["tree", "forest"], "presence_candidates": ["tree canopy", "woody vegetation"], "semantic_candidates": ["coarse-textured tree canopy", "clustered woody canopy cover", "individual and grouped tree crowns"], "instance_candidates": ["individual tree", "separate tree crown"]},
+    {"id": 6, "name": "water", "official_prompts": ["water", "river"], "presence_candidates": ["surface water", "water area"], "semantic_candidates": ["smooth dark water surface", "connected surface-water area", "bounded river or water-body surface"], "instance_candidates": ["individual water body", "connected water region"]},
+    {"id": 7, "name": "cropland", "official_prompts": ["cropland"], "presence_candidates": ["cultivated field", "agricultural land"], "semantic_candidates": ["regular cultivated texture", "parcel-shaped crop fields", "managed agricultural field surface"], "instance_candidates": ["cropland parcel", "separate cultivated field"]},
+    {"id": 8, "name": "building", "official_prompts": ["building", "roof", "house"], "presence_candidates": ["building roof", "built-up structure"], "semantic_candidates": ["rectilinear rooftop surface", "separate polygonal building footprints", "built roof regions with sharp boundaries"], "instance_candidates": ["individual building", "separate building footprint"]}
+  ]
+}

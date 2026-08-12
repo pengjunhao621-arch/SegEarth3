@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "protocol": "role_functional_text_screen_v1",
+  "dataset": "LoveDA",
+  "generator": "Codex; completion candidates frozen before evaluation",
+  "frozen_before_evaluation": true,
+  "completion": {"protocol": "role_text_completion_v1", "selected_combination": [1, 1, 0], "target_combinations": [[1, 1, 1], [1, 1, 2]], "anchor_admission_combinations": [[1, 1, 0], [1, 1, 1], [1, 1, 2], [1, 2, 1], [1, 2, 2], [1, 3, 1], [1, 3, 2], [2, 1, 1], [2, 1, 2], [2, 2, 1], [2, 2, 2], [2, 3, 1], [2, 3, 2]]},
+  "classes": [
+    {"id": 0, "name": "background", "official_prompts": ["background"], "presence_candidates": ["image background", "background region"], "semantic_candidates": ["unlabeled background", "mixed background region", "miscellaneous background"], "instance_candidates": ["complete remaining background area", "one contiguous unlabeled area"]},
+    {"id": 1, "name": "building", "official_prompts": ["building", "house"], "presence_candidates": ["buildings", "built structure"], "semantic_candidates": ["polygonal building footprint", "rectilinear building", "overhead building roof"], "instance_candidates": ["complete building roof", "one detached building footprint"]},
+    {"id": 2, "name": "road", "official_prompts": ["road"], "presence_candidates": ["roads", "roadway"], "semantic_candidates": ["elongated road surface", "continuous road surface", "paved road surface"], "instance_candidates": ["complete connected road network", "one continuous roadway component"]},
+    {"id": 3, "name": "water", "official_prompts": ["water"], "presence_candidates": ["water body", "waters"], "semantic_candidates": ["smooth water surface", "reflective water surface", "contiguous water region"], "instance_candidates": ["complete water body", "one bounded surface-water region"]},
+    {"id": 4, "name": "barren", "official_prompts": ["barren", "bareland", "soil"], "presence_candidates": ["bare land", "barren land"], "semantic_candidates": ["exposed barren ground", "dry barren surface", "sparsely vegetated barren land"], "instance_candidates": ["complete bare-soil patch", "one contiguous barren tract"]},
+    {"id": 5, "name": "forest", "official_prompts": ["forest", "tree"], "presence_candidates": ["forests", "tree cover"], "semantic_candidates": ["dense forest canopy", "textured forest canopy", "contiguous forest cover"], "instance_candidates": ["complete forest stand", "one contiguous tree-cover patch"]},
+    {"id": 6, "name": "agricultural", "official_prompts": ["agricultural"], "presence_candidates": ["agriculture", "cropland"], "semantic_candidates": ["patterned agricultural land", "cultivated agricultural land", "parcelled agricultural land"], "instance_candidates": ["complete cultivated field", "one bounded agricultural parcel"]}
+  ]
+}
