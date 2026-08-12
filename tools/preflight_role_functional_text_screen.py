@@ -47,6 +47,8 @@ def static_checks():
     for relative in sources:
         path = os.path.join(ROOT, relative)
         compile(read(path), path, 'exec')
+    segmentor_source = read(os.path.join(ROOT, 'segearthov3_segmentor.py'))
+    assert 'self._rpt_aggregate_query_logits_to_classes' not in segmentor_source
 
     report = dict(datasets={}, variants=len(VARIANT_NAMES), checks=[])
     for dataset in DATASETS:

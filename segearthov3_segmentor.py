@@ -330,7 +330,7 @@ class SegEarthOV3Segmentation(RoleFunctionalTextScreenMixin, BaseSegmentor):
                 role_predictions[name] = role_predictions[name] / cpu_counts
             # Preserve the official alias order: crop-average each query, then
             # class-max.  Role variants remain differentials around no update.
-            exact_baseline = self._rpt_aggregate_query_logits_to_classes(
+            exact_baseline = self._aggregate_query_logits_to_classes(
                 predictions.detach().float().cpu())
             crop_anchor = role_predictions['combo_p0_s0_i0'].clone()
             for name in self._rpt_variant_names():
