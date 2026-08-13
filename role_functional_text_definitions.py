@@ -10,6 +10,28 @@ PI_PROTOCOL = 'pi_role_compatibility_v1'
 PI_SCHEMA_VERSION = 1
 COMPLETION_PROTOCOL = 'role_text_completion_v1'
 COMPLETION_SCHEMA_VERSION = 1
+PE_PROTOCOL = 'pe_role_evidence_v1'
+PE_SCHEMA_VERSION = 1
+
+PE_LAYER_IDS = (7, 15, 23, 31)
+PE_FEATURE_NAMES = (
+    'block07',
+    'block15',
+    'block23',
+    'block31',
+    'fpn_final',
+    'rgb',
+)
+PE_SEMANTIC_SOURCES = (
+    'unrefined',
+    *PE_FEATURE_NAMES,
+)
+PE_ADMISSION_MODES = ('native', 'anchor_admission')
+PE_VARIANT_NAMES = tuple(
+    f'pe_sem_{source}_{admission}'
+    for source in PE_SEMANTIC_SOURCES
+    for admission in PE_ADMISSION_MODES
+)
 
 PI_VARIANT_NAMES = (
     'pi_native_p0_i0',
@@ -74,6 +96,48 @@ COMBINATION_VARIANTS = tuple(
     for semantic_slot in range(4)
     for instance_slot in range(3)
 )
+
+
+def load_role_text_selection_registry(path, dataset):
+    """Load the frozen per-dataset role compositions used by later screens."""
+    with open(path, encoding='utf-8') as handle:
+        payload = json.load(handle)
+    if int(payload.get('schema_version', -1)) != 1:
+        raise ValueError(f'{path} must use schema_version=1.')
+    datasets = payload.get('datasets')
+    if not isinstance(datasets, dict):
+        raise ValueError(f'{path} needs a datasets mapping.')
+    key = str(dataset).lower()
+    if key not in datasets:
+        raise ValueError(f'{path} has no selection for {key!r}.')
+    record = dict(datasets[key])
+
+    def slots(field):
+        value = record.get(field, {}).get('slots')
+        if (not isinstance(value, list) or len(value) != 3
+                or any(not isinstance(slot, int) for slot in value)):
+            raise ValueError(f'{key}.{field}.slots must be [P, S, I].')
+        limits = (2, 3, 2)
+        value = tuple(int(slot) for slot in value)
+        if any(slot < 0 or slot > limit
+               for slot, limit in zip(value, limits)):
+            raise ValueError(f'{key}.{field}.slots is out of range: {value}.')
+        return value
+
+    record['_best_overall_slots'] = slots('best_overall')
+    record['_best_all_nonzero_slots'] = slots('best_all_nonzero')
+    if not all(slot > 0 for slot in record['_best_all_nonzero_slots']):
+        raise ValueError(f'{key}.best_all_nonzero must not contain slot 0.')
+    instance_slot = int(record.get('instance_diagnostic_slot', -1))
+    if instance_slot not in (1, 2):
+        raise ValueError(f'{key}.instance_diagnostic_slot must be 1 or 2.')
+    record['_instance_diagnostic_slot'] = instance_slot
+    prompt_bank = record.get('prompt_bank')
+    if not isinstance(prompt_bank, str) or not prompt_bank.strip():
+        raise ValueError(f'{key}.prompt_bank must be a non-empty path.')
+    record['_dataset'] = key
+    record['_path'] = path
+    return record
 
 SENSITIVITY_VARIANTS = tuple(
     sensitivity_variant_name(role, slot, setting)

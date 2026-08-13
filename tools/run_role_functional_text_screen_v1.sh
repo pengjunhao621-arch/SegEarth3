@@ -2,7 +2,9 @@
 set -euo pipefail
 
 MODE="${1:-smoke}"
-if [[ "${MODE}" == completion-* ]]; then
+if [[ "${MODE}" == pe-* ]]; then
+    ROOT="${ROOT:-logs/pe_role_evidence_v1}"
+elif [[ "${MODE}" == completion-* ]]; then
     ROOT="${ROOT:-logs/role_text_completion_v1}"
 elif [[ "${MODE}" == pi-* ]]; then
     ROOT="${ROOT:-logs/pi_role_compatibility_v1}"
@@ -88,7 +90,9 @@ collect() {
             echo "Use a new ROOT or move the previous run first." >&2
             exit 2
         fi
-        if [[ "${experiment_mode}" == "pi" ]]; then
+        if [[ "${experiment_mode}" == "pe" ]]; then
+            echo "[pe-role-evidence-v1] ${dataset} -> ${out_dir}"
+        elif [[ "${experiment_mode}" == "pi" ]]; then
             echo "[pi-role-compatibility-v1] ${dataset} -> ${out_dir}"
         elif [[ "${experiment_mode}" == "completion" ]]; then
             echo "[role-text-completion-v1] ${dataset} -> ${out_dir}"
@@ -101,7 +105,13 @@ collect() {
             model.role_prompt_tta_integrity_tolerance="${INTEGRITY_TOLERANCE}"
             model.role_prompt_tta_save_npz=False
         )
-        if [[ "${experiment_mode}" == "pi" ]]; then
+        if [[ "${experiment_mode}" == "pe" ]]; then
+            common_options+=(
+                model.role_prompt_tta_prompt_bank="configs/prompt_banks/role_functional_text_v2/${dataset}.json"
+                model.role_prompt_tta_pe_diagnosis=True
+                model.role_prompt_tta_selection_registry="configs/experiments/role_text_selections_v1.json"
+            )
+        elif [[ "${experiment_mode}" == "pi" ]]; then
             read -r presence_slot instance_slot <<< "$(pi_slots_for "${dataset}")"
             common_options+=(
                 model.role_prompt_tta_pi_diagnosis=True
@@ -142,7 +152,9 @@ summarize() {
     fi
     mkdir -p "${ROOT}/summary"
     local summarizer="tools/summarize_role_functional_text_screen.py"
-    if [[ "${experiment_mode}" == "pi" ]]; then
+    if [[ "${experiment_mode}" == "pe" ]]; then
+        summarizer="tools/summarize_pe_role_evidence.py"
+    elif [[ "${experiment_mode}" == "pi" ]]; then
         summarizer="tools/summarize_pi_role_compatibility.py"
     fi
     "${PYTHON_BIN}" "${summarizer}" \
@@ -201,8 +213,22 @@ case "${MODE}" in
         collect full completion
         summarize completion
         ;;
+    pe-smoke)
+        collect smoke pe
+        summarize pe
+        ;;
+    pe-collect-all)
+        collect full pe
+        ;;
+    pe-summarize)
+        summarize pe
+        ;;
+    pe-all)
+        collect full pe
+        summarize pe
+        ;;
     *)
-        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all|completion-smoke|completion-collect-all|completion-summarize|completion-all}" >&2
+        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all|completion-smoke|completion-collect-all|completion-summarize|completion-all|pe-smoke|pe-collect-all|pe-summarize|pe-all}" >&2
         exit 2
         ;;
 esac
