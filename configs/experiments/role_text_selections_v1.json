@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "protocol": "validation_selected_role_text_v1",
+  "source_experiment": "role_text_completion_v1_full_99f03ff",
+  "residual_setting": {"alpha": 0.5, "clip": 0.25},
+  "note": "Slots resolve to the exact class-wise strings in configs/prompt_banks/role_functional_text_v2/<dataset>.json. best_overall may retain anchor slot 0; best_all_nonzero requires P/S/I all non-anchor.",
+  "datasets": {
+    "loveda": {
+      "prompt_bank": "configs/prompt_banks/role_functional_text_v2/loveda.json",
+      "best_overall": {"slots": [1, 1, 0], "admission": "native", "miou": 48.304995222975805},
+      "best_all_nonzero": {"slots": [1, 1, 1], "admission": "anchor_admission", "miou": 48.25112318311641},
+      "instance_diagnostic_slot": 1
+    },
+    "openearthmap": {
+      "prompt_bank": "configs/prompt_banks/role_functional_text_v2/openearthmap.json",
+      "best_overall": {"slots": [0, 3, 2], "admission": "native", "miou": 50.52946987899611},
+      "best_all_nonzero": {"slots": [2, 3, 2], "admission": "anchor_admission", "miou": 47.914102033635054},
+      "instance_diagnostic_slot": 2
+    },
+    "potsdam": {
+      "prompt_bank": "configs/prompt_banks/role_functional_text_v2/potsdam.json",
+      "best_overall": {"slots": [1, 2, 0], "admission": "anchor_admission", "miou": 58.59495367756394},
+      "best_all_nonzero": {"slots": [1, 2, 1], "admission": "anchor_admission", "miou": 58.143564040802374},
+      "instance_diagnostic_slot": 1
+    },
+    "udd5": {
+      "prompt_bank": "configs/prompt_banks/role_functional_text_v2/udd5.json",
+      "best_overall": {"slots": [1, 2, 2], "admission": "anchor_admission", "miou": 72.88588420241737},
+      "best_all_nonzero": {"slots": [1, 2, 2], "admission": "anchor_admission", "miou": 72.88588420241737},
+      "instance_diagnostic_slot": 2
+    },
+    "vaihingen": {
+      "prompt_bank": "configs/prompt_banks/role_functional_text_v2/vaihingen.json",
+      "best_overall": {"slots": [0, 3, 1], "admission": "native", "miou": 62.35103962597586},
+      "best_all_nonzero": {"slots": [1, 3, 1], "admission": "anchor_admission", "miou": 62.26470277163838},
+      "instance_diagnostic_slot": 1
+    },
+    "vdd": {
+      "prompt_bank": "configs/prompt_banks/role_functional_text_v2/vdd.json",
+      "best_overall": {"slots": [2, 1, 1], "admission": "anchor_admission", "miou": 66.12255511869064},
+      "best_all_nonzero": {"slots": [2, 1, 1], "admission": "anchor_admission", "miou": 66.12255511869064},
+      "instance_diagnostic_slot": 1
+    }
+  }
+}

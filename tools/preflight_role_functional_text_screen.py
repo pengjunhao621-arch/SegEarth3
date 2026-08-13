@@ -16,11 +16,14 @@ from role_functional_text_definitions import (
     DEFAULT_SETTING,
     PI_MECHANISM_MAP_NAMES,
     PI_VARIANT_NAMES,
+    PE_LAYER_IDS,
+    PE_VARIANT_NAMES,
     PROTOCOL,
     RESIDUAL_SETTINGS,
     ROLE_FIELDS,
     VARIANT_NAMES,
     load_role_functional_text_bank,
+    load_role_text_selection_registry,
 )
 
 
@@ -44,6 +47,7 @@ def static_checks():
         'segearthov3_segmentor.py',
         'tools/summarize_role_functional_text_screen.py',
         'tools/summarize_pi_role_compatibility.py',
+        'tools/summarize_pe_role_evidence.py',
     )
     for relative in sources:
         path = os.path.join(ROOT, relative)
@@ -87,9 +91,22 @@ def static_checks():
         assert completion_bank['completion']['protocol'] == COMPLETION_PROTOCOL
         report['datasets'][dataset]['completion_bank'] = os.path.relpath(
             completion_bank_path, ROOT)
+        selection_path = os.path.join(
+            ROOT, 'configs', 'experiments', 'role_text_selections_v1.json')
+        selection = load_role_text_selection_registry(selection_path, dataset)
+        if os.path.normpath(selection['prompt_bank']) != os.path.normpath(
+                os.path.relpath(completion_bank_path, ROOT)):
+            raise ValueError(
+                f'{dataset}: selection registry prompt bank mismatch.')
+        report['datasets'][dataset]['best_overall_slots'] = list(
+            selection['_best_overall_slots'])
+        report['datasets'][dataset]['best_all_nonzero_slots'] = list(
+            selection['_best_all_nonzero_slots'])
     assert len(set(VARIANT_NAMES)) == len(VARIANT_NAMES)
     assert len(set(PI_VARIANT_NAMES)) == len(PI_VARIANT_NAMES)
     assert len(set(PI_MECHANISM_MAP_NAMES)) == len(PI_MECHANISM_MAP_NAMES)
+    assert PE_LAYER_IDS == (7, 15, 23, 31)
+    assert len(set(PE_VARIANT_NAMES)) == len(PE_VARIANT_NAMES)
     assert DEFAULT_SETTING == 'alpha050_clip025'
     assert len(RESIDUAL_SETTINGS) == 5
     report['checks'] = [
@@ -103,6 +120,8 @@ def static_checks():
         'PI replays freeze admission, amplitude and head-winner sites',
         'completion banks define selected and anchor-admission combinations',
         'P0 completion controls are required to equal native admission',
+        'PE screen reads true ViT blocks 7/15/23/31 in one image forward',
+        'best overall and best all-nonzero role compositions are registered',
         'RemoteCLIP, CLIP APIs, training and online candidate selection are absent',
     ]
     return report

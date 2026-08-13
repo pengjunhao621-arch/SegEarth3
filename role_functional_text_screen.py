@@ -17,6 +17,11 @@ from role_functional_text_definitions import (
     PI_PROTOCOL,
     PI_SCHEMA_VERSION,
     PI_VARIANT_NAMES,
+    PE_FEATURE_NAMES,
+    PE_LAYER_IDS,
+    PE_PROTOCOL,
+    PE_SCHEMA_VERSION,
+    PE_VARIANT_NAMES,
     PROTOCOL,
     RESIDUAL_SETTINGS,
     ROLE_FIELDS,
@@ -25,6 +30,7 @@ from role_functional_text_definitions import (
     combo_variant_name,
     completion_variant_name,
     load_role_functional_text_bank,
+    load_role_text_selection_registry,
     reference_variant,
     sensitivity_variant_name,
 )
@@ -79,6 +85,8 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_pi_presence_slot=0,
             role_prompt_tta_pi_instance_slot=0,
             role_prompt_tta_completion_diagnosis=False,
+            role_prompt_tta_pe_diagnosis=False,
+            role_prompt_tta_selection_registry=None,
             **kwargs):
         self.use_role_prompt_tta = bool(use_role_prompt_tta)
         self.dump_role_prompt_tta_stats = bool(dump_role_prompt_tta_stats)
@@ -106,12 +114,17 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_pi_instance_slot)
         self.role_prompt_tta_completion_diagnosis = bool(
             role_prompt_tta_completion_diagnosis)
+        self.role_prompt_tta_pe_diagnosis = bool(
+            role_prompt_tta_pe_diagnosis)
+        self.role_prompt_tta_selection_registry = (
+            role_prompt_tta_selection_registry)
         self._role_prompt_tta_stats_file = None
         self._role_prompt_tta_saved_images = 0
         self._rpt_text_cache = None
         self._rpt_native_parity_checked = False
         self._rpt_native_parity_max_abs = None
         self._rpt_prompt_bank = None
+        self._rpt_role_selection = None
 
         if not self._uses_role_prompt_tta():
             return
@@ -149,6 +162,18 @@ class RoleFunctionalTextScreenMixin:
                 and '_completion_combinations' not in self._rpt_prompt_bank):
             raise ValueError(
                 'Completion diagnosis requires prompt-bank completion metadata.')
+        if self.role_prompt_tta_pe_diagnosis:
+            if not role_prompt_tta_selection_registry:
+                raise ValueError(
+                    'PE diagnosis requires role_prompt_tta_selection_registry.')
+            self._rpt_role_selection = load_role_text_selection_registry(
+                role_prompt_tta_selection_registry,
+                self.role_prompt_tta_dataset_name)
+            if os.path.normpath(
+                    self._rpt_role_selection['prompt_bank']) != os.path.normpath(
+                        role_prompt_tta_prompt_bank):
+                raise ValueError(
+                    'PE selection registry and configured prompt bank differ.')
         for parameter in self.processor.model.parameters():
             parameter.requires_grad_(False)
 
@@ -157,7 +182,8 @@ class RoleFunctionalTextScreenMixin:
             getattr(self, 'use_role_prompt_tta', False)
             or getattr(self, 'dump_role_prompt_tta_stats', False)
             or getattr(self, 'role_prompt_tta_pi_diagnosis', False)
-            or getattr(self, 'role_prompt_tta_completion_diagnosis', False))
+            or getattr(self, 'role_prompt_tta_completion_diagnosis', False)
+            or getattr(self, 'role_prompt_tta_pe_diagnosis', False))
 
     @staticmethod
     def _rpt_uses_class_space_variants():
@@ -169,6 +195,13 @@ class RoleFunctionalTextScreenMixin:
     def _rpt_uses_completion_diagnosis(self):
         return bool(getattr(
             self, 'role_prompt_tta_completion_diagnosis', False))
+
+    def _rpt_uses_pe_diagnosis(self):
+        return bool(getattr(self, 'role_prompt_tta_pe_diagnosis', False))
+
+    @staticmethod
+    def _rpt_pe_variant_names():
+        return PE_VARIANT_NAMES
 
     def _rpt_completion_variant_names(self):
         if not self._rpt_uses_completion_diagnosis():
@@ -194,6 +227,149 @@ class RoleFunctionalTextScreenMixin:
             torch.autocast(device_type='cuda', dtype=torch.bfloat16)
             if self.device.type == 'cuda'
             else contextlib.nullcontext())
+
+    def _rpt_set_image_with_pe_features(self, image):
+        """Encode one image and capture four true PE/ViT block outputs."""
+        if not self._rpt_uses_pe_diagnosis():
+            with torch.no_grad(), self._rpt_autocast_context():
+                return self.processor.set_image(image), None
+        trunk = self.processor.model.backbone.vision_backbone.trunk
+        captured = {}
+        handles = []
+        for layer_id in PE_LAYER_IDS:
+            def capture(_module, _inputs, output, layer_id=layer_id):
+                captured[layer_id] = output.detach()
+            handles.append(trunk.blocks[layer_id].register_forward_hook(capture))
+        try:
+            with torch.no_grad(), self._rpt_autocast_context():
+                state = self.processor.set_image(image)
+        finally:
+            for handle in handles:
+                handle.remove()
+        if tuple(sorted(captured)) != PE_LAYER_IDS:
+            raise RuntimeError(
+                f'PE hooks captured {tuple(sorted(captured))}, '
+                f'expected {PE_LAYER_IDS}.')
+
+        features = OrderedDict()
+        for layer_id in PE_LAYER_IDS:
+            value = captured[layer_id]
+            if value.ndim == 4 and value.shape[-1] > value.shape[1]:
+                value = value.permute(0, 3, 1, 2)
+            if value.ndim != 4:
+                raise RuntimeError(
+                    f'PE block {layer_id} returned shape {tuple(value.shape)}.')
+            features[f'block{layer_id:02d}'] = F.normalize(
+                value.float(), dim=1, eps=1e-6)
+        final = state['backbone_out']['vision_features']
+        features['fpn_final'] = F.normalize(
+            final.float(), dim=1, eps=1e-6)
+        rgb = torch.from_numpy(
+            np.asarray(image, dtype=np.float32).copy()).permute(2, 0, 1)
+        rgb = rgb.unsqueeze(0).to(self.device) / 255.0
+        features['rgb'] = F.normalize(F.interpolate(
+            rgb, size=features['block07'].shape[-2:], mode='bilinear',
+            align_corners=False), dim=1, eps=1e-6)
+        return state, features
+
+    @staticmethod
+    def _rft_shift(value, dy, dx):
+        height, width = value.shape[-2:]
+        padded = F.pad(value, (1, 1, 1, 1), mode='replicate')
+        return padded[..., 1 + dy:1 + dy + height,
+                      1 + dx:1 + dx + width]
+
+    def _rft_spatial_refine(self, delta, feature, output_shape):
+        """One local feature-affinity pass over a bounded semantic residual."""
+        feature = feature.float()
+        size = feature.shape[-2:]
+        value = F.interpolate(
+            delta[None, None].to(self.device).float(), size=size,
+            mode='bilinear', align_corners=False)
+        weighted = value.clone()
+        denominator = torch.ones_like(value)
+        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1),
+                       (-1, -1), (-1, 1), (1, -1), (1, 1)):
+            neighbour = self._rft_shift(feature, dy, dx)
+            similarity = (feature * neighbour).sum(dim=1, keepdim=True)
+            weight = torch.exp((similarity.clamp(-1.0, 1.0) - 1.0) / 0.10)
+            weighted = weighted + weight * self._rft_shift(value, dy, dx)
+            denominator = denominator + weight
+        refined = weighted / denominator.clamp_min(1e-6)
+        return F.interpolate(
+            refined, size=output_shape, mode='bilinear',
+            align_corners=False).squeeze().detach().float().cpu()
+
+    def _rft_query_region_rows(
+            self, package, features, class_index, class_name, slot,
+            admission_presence):
+        """Read PE region evidence without changing query admission/output."""
+        count = min(
+            int(package['raw_masks'].shape[0]),
+            int(package['raw_scores'].numel()))
+        if count == 0:
+            return []
+        raw_scores = package['raw_scores'][:count].float()
+        keep = raw_scores * float(admission_presence) > float(
+            self.processor.confidence_threshold)
+        kept_indices = torch.nonzero(keep, as_tuple=False).flatten()
+        if not kept_indices.numel():
+            return []
+        raw_masks = package['raw_masks'][:count][keep].to(self.device).float()
+        rows = [dict(
+            class_index=int(class_index), class_name=class_name,
+            instance_slot=int(slot), query_index=int(query_index),
+            object_score=float(raw_scores[query_index].item()),
+            admission_presence=float(admission_presence),
+            admission_score=float(
+                raw_scores[query_index].item() * float(admission_presence)),
+        ) for query_index in kept_indices.tolist()]
+        count = len(rows)
+        common_support = None
+        for feature_name, feature in features.items():
+            feature = feature.float()
+            size = feature.shape[-2:]
+            masks = F.interpolate(
+                raw_masks.unsqueeze(1), size=size, mode='bilinear',
+                align_corners=False).sigmoid().squeeze(1)
+            flat_feature = feature[0].flatten(1)
+            flat_masks = masks.flatten(1)
+            mass = flat_masks.sum(dim=1).clamp_min(1e-6)
+            prototypes = F.normalize(
+                flat_masks.matmul(flat_feature.t()) / mass[:, None],
+                dim=1, eps=1e-6)
+            similarity = prototypes.matmul(flat_feature).reshape(
+                count, *size)
+            inside = (similarity * masks).flatten(1).sum(dim=1) / mass
+            ring = (F.max_pool2d(
+                masks.unsqueeze(1), 3, stride=1, padding=1).squeeze(1)
+                    - masks).clamp_min(0.0)
+            ring_mass = ring.flatten(1).sum(dim=1).clamp_min(1e-6)
+            ring_score = (similarity * ring).flatten(1).sum(dim=1) / ring_mass
+
+            boundary_sum = torch.zeros(count, device=self.device)
+            boundary_mass = torch.zeros(count, device=self.device)
+            for dy, dx in ((1, 0), (0, 1)):
+                shifted_masks = self._rft_shift(masks, dy, dx)
+                shifted_feature = self._rft_shift(feature, dy, dx)
+                mask_edge = (masks - shifted_masks).abs()
+                visual_edge = (1.0 - (
+                    feature * shifted_feature).sum(dim=1)).clamp_min(0.0)
+                boundary_sum += (mask_edge * visual_edge).flatten(1).sum(1)
+                boundary_mass += mask_edge.flatten(1).sum(1)
+            agreement = boundary_sum / boundary_mass.clamp_min(1e-6)
+            if common_support is None:
+                common_support = (masks >= 0.5).to(torch.uint8).cpu()
+            for index, row in enumerate(rows):
+                row[f'{feature_name}_inside_coherence'] = float(
+                    inside[index].item())
+                row[f'{feature_name}_ring_separation'] = float(
+                    (inside[index] - ring_score[index]).item())
+                row[f'{feature_name}_boundary_agreement'] = float(
+                    agreement[index].item())
+        for index, row in enumerate(rows):
+            row['_support'] = common_support[index]
+        return rows
 
     def _rpt_prepare_text_cache(self):
         if self._rpt_text_cache is not None:
@@ -584,8 +760,7 @@ class RoleFunctionalTextScreenMixin:
         if self.device.type == 'cuda':
             torch.cuda.reset_peak_memory_stats(self.device)
         cache = self._rpt_prepare_text_cache()
-        with torch.no_grad(), self._rpt_autocast_context():
-            state = self.processor.set_image(image)
+        state, pe_features = self._rpt_set_image_with_pe_features(image)
 
         packages = {}
         parity_errors = []
@@ -662,6 +837,14 @@ class RoleFunctionalTextScreenMixin:
                     (self.num_cls, height, width), dtype=torch.float32,
                     device='cpu'))
                 for name in self._rpt_completion_variant_names())
+        pe_variants = None
+        pe_query_rows = []
+        if self._rpt_uses_pe_diagnosis():
+            pe_variants = OrderedDict(
+                (name, torch.empty(
+                    (self.num_cls, height, width), dtype=torch.float32,
+                    device='cpu'))
+                for name in PE_VARIANT_NAMES)
         settings = {
             name: (float(alpha), float(clip))
             for name, alpha, clip in RESIDUAL_SETTINGS
@@ -775,6 +958,66 @@ class RoleFunctionalTextScreenMixin:
                             default_alpha, default_clip)
                         variants[f'instance_head_i{slot}'][
                             class_index].copy_(value)
+
+            if self._rpt_uses_pe_diagnosis():
+                selected_slots = self._rpt_role_selection[
+                    '_best_overall_slots']
+                p_slot, s_slot, i_slot = selected_slots
+                diagnostic_i_slot = self._rpt_role_selection[
+                    '_instance_diagnostic_slot']
+                presence_package = (
+                    role_packages['presence'][p_slot] if p_slot else None)
+                semantic_package = (
+                    role_packages['semantic'][s_slot] if s_slot else None)
+                instance_package = (
+                    role_packages['instance'][i_slot] if i_slot else None)
+                presence = anchor_presence
+                if presence_package is not None:
+                    presence, _ = self._rft_bounded(
+                        anchor_presence, presence_package['presence'],
+                        default_alpha, default_clip)
+                semantic_delta = torch.zeros_like(anchor_semantic)
+                if semantic_package is not None:
+                    _, semantic_delta = self._rft_bounded(
+                        anchor_semantic, semantic_package['semantic'],
+                        default_alpha, default_clip)
+                    semantic_delta = semantic_delta.clamp(
+                        -default_clip, default_clip)
+                semantic_sources = OrderedDict(unrefined=semantic_delta)
+                for feature_name in PE_FEATURE_NAMES:
+                    semantic_sources[feature_name] = self._rft_spatial_refine(
+                        semantic_delta, pe_features[feature_name], output_shape)
+
+                def selected_instance(anchor_admission):
+                    admission = anchor_presence if anchor_admission else presence
+                    base, _ = instance_for(anchor, presence, admission)
+                    if instance_package is None:
+                        return base
+                    candidate, _ = instance_for(
+                        instance_package, presence, admission)
+                    value, _ = self._rft_bounded(
+                        base, candidate, default_alpha, default_clip)
+                    return value
+
+                for source_name, residual in semantic_sources.items():
+                    semantic = (
+                        anchor_semantic
+                        + default_alpha * residual).clamp(0.0, 1.0)
+                    for admission_name, use_anchor_admission in (
+                            ('native', False), ('anchor_admission', True)):
+                        instance = selected_instance(use_anchor_admission)
+                        role_final = self._rft_role_final(
+                            semantic, instance, presence, output_shape)
+                        name = f'pe_sem_{source_name}_{admission_name}'
+                        pe_variants[name][class_index].copy_((
+                            official_final.float() + role_final.float()
+                            - role_anchor_final.float()).clamp(0.0, 1.0))
+
+                diagnostic_package = role_packages['instance'][
+                    diagnostic_i_slot]
+                pe_query_rows.extend(self._rft_query_region_rows(
+                    diagnostic_package, pe_features, class_index,
+                    item['name'], diagnostic_i_slot, anchor_presence))
 
             if self._rpt_uses_pi_diagnosis():
                 pi_role_finals, pi_maps, pi_query_row = (
@@ -923,6 +1166,8 @@ class RoleFunctionalTextScreenMixin:
                 and tuple(completion_variants)
                 != self._rpt_completion_variant_names()):
             raise RuntimeError('Completion variant order drifted.')
+        if pe_variants is not None and tuple(pe_variants) != PE_VARIANT_NAMES:
+            raise RuntimeError('PE variant order drifted.')
         if (self.role_prompt_tta_strict_integrity
                 and max(identity_error, recomposition_error,
                         pi_identity_error, pi_replay_match_error,
@@ -989,6 +1234,23 @@ class RoleFunctionalTextScreenMixin:
                         list(value) for value in self._rpt_prompt_bank[
                             '_completion_targets']],
                 ) if completion_variants is not None else None),
+            pe_diagnosis=(
+                dict(
+                    schema_version=PE_SCHEMA_VERSION,
+                    protocol=PE_PROTOCOL,
+                    pe_layers=list(PE_LAYER_IDS),
+                    selected_combination=list(
+                        self._rpt_role_selection['_best_overall_slots']),
+                    selected_admission=self._rpt_role_selection[
+                        'best_overall']['admission'],
+                    best_all_nonzero_combination=list(
+                        self._rpt_role_selection[
+                            '_best_all_nonzero_slots']),
+                    instance_diagnostic_slot=int(
+                        self._rpt_role_selection[
+                            '_instance_diagnostic_slot']),
+                    query_rows=pe_query_rows,
+                ) if pe_variants is not None else None),
             cuda_memory=dict(main=_cuda_memory_snapshot(self.device)),
         )
         primary = baseline_query['final'].to(self.device)
@@ -1005,6 +1267,8 @@ class RoleFunctionalTextScreenMixin:
         if completion_variants is not None:
             components['role_prompt_completion_variant_class_logits'] = (
                 completion_variants)
+        if pe_variants is not None:
+            components['role_prompt_pe_variant_class_logits'] = pe_variants
         stats = dict(
             view_id=view_id,
             crop_box=crop_box,
@@ -1069,8 +1333,90 @@ class RoleFunctionalTextScreenMixin:
                 rows.append(row)
             view['candidate_rows'] = rows
             view['gt_class_presence'] = gt_presence
+            pe = view.get('pe_diagnosis')
+            if pe is not None:
+                query_rows = []
+                for source_row in pe.get('query_rows', []):
+                    row = dict(source_row)
+                    support = row.pop('_support').bool()[None, None]
+                    support = F.interpolate(
+                        support.float(), size=crop_gt.shape[-2:],
+                        mode='nearest').squeeze().bool()
+                    class_index = int(row['class_index'])
+                    target = valid & (crop_gt == class_index)
+                    intersection = int((support & target).sum().item())
+                    support_pixels = int((support & valid).sum().item())
+                    target_pixels = int(target.sum().item())
+                    union = support_pixels + target_pixels - intersection
+                    row.update(
+                        gt_present=bool(target_pixels),
+                        support_pixels=support_pixels,
+                        gt_pixels=target_pixels,
+                        gt_intersection_pixels=intersection,
+                        gt_false_positive_pixels=(
+                            support_pixels - intersection),
+                        gt_precision=_safe_div(
+                            intersection, support_pixels),
+                        gt_recall=_safe_div(intersection, target_pixels),
+                        gt_iou=_safe_div(intersection, union),
+                    )
+                    query_rows.append(row)
+                pe = dict(pe)
+                pe['query_rows'] = query_rows
+                view['pe_diagnosis'] = pe
             enriched.append(view)
         return enriched
+
+    def _rft_pe_record(self, pe_variant_logits, gt, valid):
+        if pe_variant_logits is None:
+            return None
+        if tuple(pe_variant_logits) != PE_VARIANT_NAMES:
+            raise RuntimeError('Recorded PE variants drifted.')
+        rows = OrderedDict()
+        gt_boundary = torch.zeros_like(valid)
+        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            shifted_gt = self._rft_shift(gt[None, None].float(), dy, dx)
+            shifted_valid = self._rft_shift(
+                valid[None, None].float(), dy, dx).bool()
+            gt_boundary |= (
+                valid & shifted_valid.squeeze()
+                & (gt != shifted_gt.squeeze().long()))
+        gt_boundary = F.max_pool2d(
+            gt_boundary.float()[None, None], 3, stride=1,
+            padding=1).squeeze().bool() & valid
+        for name in PE_VARIANT_NAMES:
+            admission = (
+                'anchor_admission' if name.endswith('_anchor_admission')
+                else 'native')
+            reference_name = f'pe_sem_unrefined_{admission}'
+            reference = self._rpt_threshold(
+                pe_variant_logits[reference_name].detach().float().cpu()
+            ).to(torch.int16)
+            prediction = self._rpt_threshold(
+                pe_variant_logits[name].detach().float().cpu()
+            ).to(torch.int16)
+            changed = valid & (prediction != reference)
+            improved = changed & (prediction == gt) & (reference != gt)
+            harmed = changed & (prediction != gt) & (reference == gt)
+            rows[name] = dict(
+                reference_variant=reference_name,
+                confusion=self._rpt_confusion(prediction, gt, valid),
+                changed_pixels=int(changed.sum().item()),
+                improved_pixels=int(improved.sum().item()),
+                harmed_pixels=int(harmed.sum().item()),
+                changed_boundary_pixels=int((changed & gt_boundary).sum()),
+                improved_boundary_pixels=int((improved & gt_boundary).sum()),
+                harmed_boundary_pixels=int((harmed & gt_boundary).sum()),
+                help_minus_harm=(int(improved.sum().item())
+                                 - int(harmed.sum().item())),
+            )
+        return dict(
+            schema_version=PE_SCHEMA_VERSION,
+            protocol=PE_PROTOCOL,
+            selected_combination=list(
+                self._rpt_role_selection['_best_overall_slots']),
+            variants=rows,
+        )
 
     def _rft_pi_record(
             self, pi_variant_logits, mechanism_maps, gt, valid):
@@ -1262,7 +1608,7 @@ class RoleFunctionalTextScreenMixin:
     def _rpt_record_image(
             self, variant_logits, view_stats, data_sample, image_path,
             pi_variant_logits=None, pi_mechanism_maps=None,
-            completion_variant_logits=None):
+            completion_variant_logits=None, pe_variant_logits=None):
         if not self.dump_role_prompt_tta_stats:
             return
         if data_sample is None or not hasattr(data_sample, 'gt_sem_seg'):
@@ -1328,6 +1674,8 @@ class RoleFunctionalTextScreenMixin:
                 pi_variant_logits, pi_mechanism_maps, gt, valid),
             role_text_completion=self._rft_completion_record(
                 completion_variant_logits, variant_logits, gt, valid),
+            pe_role_evidence=self._rft_pe_record(
+                pe_variant_logits, gt, valid),
         )
         self._rpt_write_stats(record)
         self._rpt_save_artifact(image_path, predictions, gt, valid)
