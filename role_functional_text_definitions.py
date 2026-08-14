@@ -12,6 +12,8 @@ COMPLETION_PROTOCOL = 'role_text_completion_v1'
 COMPLETION_SCHEMA_VERSION = 1
 PE_PROTOCOL = 'pe_role_evidence_v1'
 PE_SCHEMA_VERSION = 1
+BOUNDARY_REPLAY_PROTOCOL = 'boundary_replay_v1'
+BOUNDARY_REPLAY_SCHEMA_VERSION = 1
 
 PE_LAYER_IDS = (7, 15, 23, 31)
 PE_FEATURE_NAMES = (
@@ -31,6 +33,32 @@ PE_VARIANT_NAMES = tuple(
     f'pe_sem_{source}_{admission}'
     for source in PE_SEMANTIC_SOURCES
     for admission in PE_ADMISSION_MODES
+)
+
+BOUNDARY_GUIDES = ('block23', 'rgb', 'uniform')
+BOUNDARY_STRENGTHS = (
+    ('l025', 0.25),
+    ('l050', 0.50),
+    ('l100', 1.00),
+)
+BOUNDARY_PRIMARY_STRENGTH = 'l050'
+REPLAY_VARIANT_NAMES = (
+    'br_official',
+    'br_best_full',
+    'br_replay_p',
+    'br_replay_s',
+    'br_replay_i',
+    'br_replay_all',
+)
+BOUNDARY_VARIANT_NAMES = tuple(
+    f'br_{base}_{guide}_{strength}'
+    for guide in BOUNDARY_GUIDES
+    for strength, _ in BOUNDARY_STRENGTHS
+    for base in ('official', 'best')
+)
+BOUNDARY_REPLAY_VARIANT_NAMES = (
+    *REPLAY_VARIANT_NAMES,
+    *BOUNDARY_VARIANT_NAMES,
 )
 
 PI_VARIANT_NAMES = (

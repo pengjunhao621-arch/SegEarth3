@@ -12,6 +12,9 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from role_functional_text_definitions import (
+    BOUNDARY_GUIDES,
+    BOUNDARY_REPLAY_VARIANT_NAMES,
+    BOUNDARY_STRENGTHS,
     COMPLETION_PROTOCOL,
     DEFAULT_SETTING,
     PI_MECHANISM_MAP_NAMES,
@@ -42,12 +45,14 @@ def class_file(path):
 
 def static_checks():
     sources = (
+        'boundary_replay.py',
         'role_functional_text_definitions.py',
         'role_functional_text_screen.py',
         'segearthov3_segmentor.py',
         'tools/summarize_role_functional_text_screen.py',
         'tools/summarize_pi_role_compatibility.py',
         'tools/summarize_pe_role_evidence.py',
+        'tools/summarize_boundary_replay.py',
     )
     for relative in sources:
         path = os.path.join(ROOT, relative)
@@ -107,6 +112,11 @@ def static_checks():
     assert len(set(PI_MECHANISM_MAP_NAMES)) == len(PI_MECHANISM_MAP_NAMES)
     assert PE_LAYER_IDS == (7, 15, 23, 31)
     assert len(set(PE_VARIANT_NAMES)) == len(PE_VARIANT_NAMES)
+    assert BOUNDARY_GUIDES == ('block23', 'rgb', 'uniform')
+    assert tuple(value for _, value in BOUNDARY_STRENGTHS) == (
+        0.25, 0.50, 1.00)
+    assert (len(set(BOUNDARY_REPLAY_VARIANT_NAMES))
+            == len(BOUNDARY_REPLAY_VARIANT_NAMES))
     assert DEFAULT_SETTING == 'alpha050_clip025'
     assert len(RESIDUAL_SETTINGS) == 5
     report['checks'] = [
@@ -122,6 +132,8 @@ def static_checks():
         'P0 completion controls are required to equal native admission',
         'PE screen reads true ViT blocks 7/15/23/31 in one image forward',
         'best overall and best all-nonzero role compositions are registered',
+        'boundary replay keeps block23/RGB/uniform controls and three fixed strengths',
+        'anchor-clamped replay has separate P/S/I/all counterfactual paths',
         'RemoteCLIP, CLIP APIs, training and online candidate selection are absent',
     ]
     return report

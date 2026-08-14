@@ -2,7 +2,9 @@
 set -euo pipefail
 
 MODE="${1:-smoke}"
-if [[ "${MODE}" == pe-* ]]; then
+if [[ "${MODE}" == boundary-replay-* ]]; then
+    ROOT="${ROOT:-logs/boundary_replay_v1}"
+elif [[ "${MODE}" == pe-* ]]; then
     ROOT="${ROOT:-logs/pe_role_evidence_v1}"
 elif [[ "${MODE}" == completion-* ]]; then
     ROOT="${ROOT:-logs/role_text_completion_v1}"
@@ -92,6 +94,8 @@ collect() {
         fi
         if [[ "${experiment_mode}" == "pe" ]]; then
             echo "[pe-role-evidence-v1] ${dataset} -> ${out_dir}"
+        elif [[ "${experiment_mode}" == "boundary-replay" ]]; then
+            echo "[boundary-replay-v1] ${dataset} -> ${out_dir}"
         elif [[ "${experiment_mode}" == "pi" ]]; then
             echo "[pi-role-compatibility-v1] ${dataset} -> ${out_dir}"
         elif [[ "${experiment_mode}" == "completion" ]]; then
@@ -109,6 +113,12 @@ collect() {
             common_options+=(
                 model.role_prompt_tta_prompt_bank="configs/prompt_banks/role_functional_text_v2/${dataset}.json"
                 model.role_prompt_tta_pe_diagnosis=True
+                model.role_prompt_tta_selection_registry="configs/experiments/role_text_selections_v1.json"
+            )
+        elif [[ "${experiment_mode}" == "boundary-replay" ]]; then
+            common_options+=(
+                model.role_prompt_tta_prompt_bank="configs/prompt_banks/role_functional_text_v2/${dataset}.json"
+                model.role_prompt_tta_boundary_replay_diagnosis=True
                 model.role_prompt_tta_selection_registry="configs/experiments/role_text_selections_v1.json"
             )
         elif [[ "${experiment_mode}" == "pi" ]]; then
@@ -154,6 +164,8 @@ summarize() {
     local summarizer="tools/summarize_role_functional_text_screen.py"
     if [[ "${experiment_mode}" == "pe" ]]; then
         summarizer="tools/summarize_pe_role_evidence.py"
+    elif [[ "${experiment_mode}" == "boundary-replay" ]]; then
+        summarizer="tools/summarize_boundary_replay.py"
     elif [[ "${experiment_mode}" == "pi" ]]; then
         summarizer="tools/summarize_pi_role_compatibility.py"
     fi
@@ -227,8 +239,22 @@ case "${MODE}" in
         collect full pe
         summarize pe
         ;;
+    boundary-replay-smoke)
+        collect smoke boundary-replay
+        summarize boundary-replay
+        ;;
+    boundary-replay-collect-all)
+        collect full boundary-replay
+        ;;
+    boundary-replay-summarize)
+        summarize boundary-replay
+        ;;
+    boundary-replay-all)
+        collect full boundary-replay
+        summarize boundary-replay
+        ;;
     *)
-        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all|completion-smoke|completion-collect-all|completion-summarize|completion-all|pe-smoke|pe-collect-all|pe-summarize|pe-all}" >&2
+        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all|completion-smoke|completion-collect-all|completion-summarize|completion-all|pe-smoke|pe-collect-all|pe-summarize|pe-all|boundary-replay-smoke|boundary-replay-collect-all|boundary-replay-summarize|boundary-replay-all}" >&2
         exit 2
         ;;
 esac

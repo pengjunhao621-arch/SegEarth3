@@ -10,6 +10,9 @@ import torch
 import torch.nn.functional as F
 
 from role_functional_text_definitions import (
+    BOUNDARY_REPLAY_PROTOCOL,
+    BOUNDARY_REPLAY_SCHEMA_VERSION,
+    BOUNDARY_REPLAY_VARIANT_NAMES,
     COMPLETION_PROTOCOL,
     COMPLETION_SCHEMA_VERSION,
     DEFAULT_SETTING,
@@ -86,6 +89,7 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_pi_instance_slot=0,
             role_prompt_tta_completion_diagnosis=False,
             role_prompt_tta_pe_diagnosis=False,
+            role_prompt_tta_boundary_replay_diagnosis=False,
             role_prompt_tta_selection_registry=None,
             **kwargs):
         self.use_role_prompt_tta = bool(use_role_prompt_tta)
@@ -116,6 +120,8 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_completion_diagnosis)
         self.role_prompt_tta_pe_diagnosis = bool(
             role_prompt_tta_pe_diagnosis)
+        self.role_prompt_tta_boundary_replay_diagnosis = bool(
+            role_prompt_tta_boundary_replay_diagnosis)
         self.role_prompt_tta_selection_registry = (
             role_prompt_tta_selection_registry)
         self._role_prompt_tta_stats_file = None
@@ -162,10 +168,12 @@ class RoleFunctionalTextScreenMixin:
                 and '_completion_combinations' not in self._rpt_prompt_bank):
             raise ValueError(
                 'Completion diagnosis requires prompt-bank completion metadata.')
-        if self.role_prompt_tta_pe_diagnosis:
+        if (self.role_prompt_tta_pe_diagnosis
+                or self.role_prompt_tta_boundary_replay_diagnosis):
             if not role_prompt_tta_selection_registry:
                 raise ValueError(
-                    'PE diagnosis requires role_prompt_tta_selection_registry.')
+                    'PE/boundary replay diagnosis requires '
+                    'role_prompt_tta_selection_registry.')
             self._rpt_role_selection = load_role_text_selection_registry(
                 role_prompt_tta_selection_registry,
                 self.role_prompt_tta_dataset_name)
@@ -173,7 +181,7 @@ class RoleFunctionalTextScreenMixin:
                     self._rpt_role_selection['prompt_bank']) != os.path.normpath(
                         role_prompt_tta_prompt_bank):
                 raise ValueError(
-                    'PE selection registry and configured prompt bank differ.')
+                    'Selection registry and configured prompt bank differ.')
         for parameter in self.processor.model.parameters():
             parameter.requires_grad_(False)
 
@@ -183,7 +191,9 @@ class RoleFunctionalTextScreenMixin:
             or getattr(self, 'dump_role_prompt_tta_stats', False)
             or getattr(self, 'role_prompt_tta_pi_diagnosis', False)
             or getattr(self, 'role_prompt_tta_completion_diagnosis', False)
-            or getattr(self, 'role_prompt_tta_pe_diagnosis', False))
+            or getattr(self, 'role_prompt_tta_pe_diagnosis', False)
+            or getattr(
+                self, 'role_prompt_tta_boundary_replay_diagnosis', False))
 
     @staticmethod
     def _rpt_uses_class_space_variants():
@@ -198,6 +208,10 @@ class RoleFunctionalTextScreenMixin:
 
     def _rpt_uses_pe_diagnosis(self):
         return bool(getattr(self, 'role_prompt_tta_pe_diagnosis', False))
+
+    def _rpt_uses_boundary_replay(self):
+        return bool(getattr(
+            self, 'role_prompt_tta_boundary_replay_diagnosis', False))
 
     @staticmethod
     def _rpt_pe_variant_names():
@@ -230,13 +244,16 @@ class RoleFunctionalTextScreenMixin:
 
     def _rpt_set_image_with_pe_features(self, image):
         """Encode one image and capture four true PE/ViT block outputs."""
-        if not self._rpt_uses_pe_diagnosis():
+        if (not self._rpt_uses_pe_diagnosis()
+                and not self._rpt_uses_boundary_replay()):
             with torch.no_grad(), self._rpt_autocast_context():
                 return self.processor.set_image(image), None
         trunk = self.processor.model.backbone.vision_backbone.trunk
         captured = {}
         handles = []
-        for layer_id in PE_LAYER_IDS:
+        layer_ids = (
+            PE_LAYER_IDS if self._rpt_uses_pe_diagnosis() else (23,))
+        for layer_id in layer_ids:
             def capture(_module, _inputs, output, layer_id=layer_id):
                 captured[layer_id] = output.detach()
             handles.append(trunk.blocks[layer_id].register_forward_hook(capture))
@@ -246,13 +263,13 @@ class RoleFunctionalTextScreenMixin:
         finally:
             for handle in handles:
                 handle.remove()
-        if tuple(sorted(captured)) != PE_LAYER_IDS:
+        if tuple(sorted(captured)) != tuple(layer_ids):
             raise RuntimeError(
                 f'PE hooks captured {tuple(sorted(captured))}, '
-                f'expected {PE_LAYER_IDS}.')
+                f'expected {tuple(layer_ids)}.')
 
         features = OrderedDict()
-        for layer_id in PE_LAYER_IDS:
+        for layer_id in layer_ids:
             value = captured[layer_id]
             if value.ndim == 4 and value.shape[-1] > value.shape[1]:
                 value = value.permute(0, 3, 1, 2)
@@ -261,14 +278,16 @@ class RoleFunctionalTextScreenMixin:
                     f'PE block {layer_id} returned shape {tuple(value.shape)}.')
             features[f'block{layer_id:02d}'] = F.normalize(
                 value.float(), dim=1, eps=1e-6)
-        final = state['backbone_out']['vision_features']
-        features['fpn_final'] = F.normalize(
-            final.float(), dim=1, eps=1e-6)
+        if self._rpt_uses_pe_diagnosis():
+            final = state['backbone_out']['vision_features']
+            features['fpn_final'] = F.normalize(
+                final.float(), dim=1, eps=1e-6)
         rgb = torch.from_numpy(
             np.asarray(image, dtype=np.float32).copy()).permute(2, 0, 1)
         rgb = rgb.unsqueeze(0).to(self.device) / 255.0
         features['rgb'] = F.normalize(F.interpolate(
-            rgb, size=features['block07'].shape[-2:], mode='bilinear',
+            rgb, size=next(iter(features.values())).shape[-2:],
+            mode='bilinear',
             align_corners=False), dim=1, eps=1e-6)
         return state, features
 
@@ -403,7 +422,7 @@ class RoleFunctionalTextScreenMixin:
         )
         return self._rpt_text_cache
 
-    def _rpt_set_cached_prompt(self, state, prompt):
+    def _rpt_load_cached_prompt(self, state, prompt):
         cache = self._rpt_prepare_text_cache()
         prompt_index = int(cache['index'][prompt])
         self.processor.reset_all_prompts(state)
@@ -412,6 +431,10 @@ class RoleFunctionalTextScreenMixin:
         state['backbone_out']['language_mask'] = (
             cache['language_mask'][prompt_index:prompt_index + 1])
         state['geometric_prompt'] = self.processor.model._get_dummy_prompt()
+        return state
+
+    def _rpt_set_cached_prompt(self, state, prompt):
+        self._rpt_load_cached_prompt(state, prompt)
         return self.processor._forward_grounding(state)
 
     def _rpt_prompt_components(self, state, output_shape):
@@ -845,6 +868,15 @@ class RoleFunctionalTextScreenMixin:
                     (self.num_cls, height, width), dtype=torch.float32,
                     device='cpu'))
                 for name in PE_VARIANT_NAMES)
+        boundary_replay_variants = None
+        boundary_replay_query_rows = []
+        boundary_replay_class_rows = []
+        if self._rpt_uses_boundary_replay():
+            boundary_replay_variants = OrderedDict(
+                (name, torch.empty(
+                    (self.num_cls, height, width), dtype=torch.float32,
+                    device='cpu'))
+                for name in BOUNDARY_REPLAY_VARIANT_NAMES)
         settings = {
             name: (float(alpha), float(clip))
             for name, alpha, clip in RESIDUAL_SETTINGS
@@ -853,6 +885,7 @@ class RoleFunctionalTextScreenMixin:
         candidate_rows = []
         class_rows = []
         recomposition_errors = []
+        boundary_selection_errors = []
         query_indices = self.query_idx.detach().long().cpu()
 
         for class_index, item in enumerate(self._rpt_prompt_bank['classes']):
@@ -1088,6 +1121,40 @@ class RoleFunctionalTextScreenMixin:
                     + role_final.float() - role_anchor_final.float()
                 ).clamp(0.0, 1.0)
 
+            if boundary_replay_variants is not None:
+                with torch.no_grad(), self._rpt_autocast_context():
+                    class_variants, query_rows, diagnostic_row = (
+                        self._br_class_variants(
+                            state=state,
+                            output_shape=output_shape,
+                            class_index=class_index,
+                            class_name=item['name'],
+                            official_prompts=list(item['official_prompts']),
+                            official_packages=official_packages,
+                            anchor=anchor,
+                            role_packages=role_packages,
+                            official_final=official_final,
+                            role_anchor_final=role_anchor_final,
+                            pe_features=pe_features,
+                            default_alpha=default_alpha,
+                            default_clip=default_clip))
+                for name, value in class_variants.items():
+                    boundary_replay_variants[name][class_index].copy_(value)
+                selected_slots = self._rpt_role_selection[
+                    '_best_overall_slots']
+                expected_selected = compose(
+                    *selected_slots,
+                    anchor_admission=(
+                        self._rpt_role_selection['best_overall'][
+                            'admission'] == 'anchor_admission'))
+                boundary_selection_errors.append(max(
+                    float((class_variants['br_official']
+                           - official_final.float()).abs().max().item()),
+                    float((class_variants['br_best_full']
+                           - expected_selected).abs().max().item())))
+                boundary_replay_query_rows.extend(query_rows)
+                boundary_replay_class_rows.append(diagnostic_row)
+
             for presence_slot in range(3):
                 for semantic_slot in range(4):
                     for instance_slot in range(3):
@@ -1151,6 +1218,7 @@ class RoleFunctionalTextScreenMixin:
                 pi_variants[pi_name] - variants[combo_name]
             ).abs().max().item()) for pi_name, combo_name in replay_pairs)
         recomposition_error = max(recomposition_errors or [0.0])
+        boundary_selection_error = max(boundary_selection_errors or [0.0])
         completion_noop_error = 0.0
         if completion_variants is not None:
             completion_noop_error = max([
@@ -1168,10 +1236,14 @@ class RoleFunctionalTextScreenMixin:
             raise RuntimeError('Completion variant order drifted.')
         if pe_variants is not None and tuple(pe_variants) != PE_VARIANT_NAMES:
             raise RuntimeError('PE variant order drifted.')
+        if (boundary_replay_variants is not None
+                and tuple(boundary_replay_variants)
+                != BOUNDARY_REPLAY_VARIANT_NAMES):
+            raise RuntimeError('Boundary/replay variant order drifted.')
         if (self.role_prompt_tta_strict_integrity
                 and max(identity_error, recomposition_error,
                         pi_identity_error, pi_replay_match_error,
-                        completion_noop_error)
+                        completion_noop_error, boundary_selection_error)
                 > self.role_prompt_tta_integrity_tolerance):
             raise RuntimeError(
                 'Role-functional integrity failed: '
@@ -1179,6 +1251,7 @@ class RoleFunctionalTextScreenMixin:
                 f'pi_identity={pi_identity_error}, '
                 f'pi_replay_match={pi_replay_match_error}, '
                 f'completion_noop={completion_noop_error}, '
+                f'boundary_selection={boundary_selection_error}, '
                 f'native_recomposition={recomposition_error}.')
 
         view_stats = dict(
@@ -1196,15 +1269,22 @@ class RoleFunctionalTextScreenMixin:
             pi_replay_match_max_abs=pi_replay_match_error,
             completion_noop_max_abs=completion_noop_error,
             native_recomposition_max_abs=recomposition_error,
+            boundary_selection_max_abs=boundary_selection_error,
             official_query_count=int(self.num_queries),
             canonical_class_count=int(self.num_cls),
             diagnostic_variant_count=(
-                len(variants) + len(completion_variants or {})),
+                len(variants) + len(completion_variants or {})
+                + len(pe_variants or {})
+                + len(boundary_replay_variants or {})),
             diagnostic_cpu_bytes=int(sum(
                 value.numel() * value.element_size()
                 for value in variants.values()) + sum(
-                    value.numel() * value.element_size()
-                    for value in (completion_variants or {}).values())),
+                value.numel() * value.element_size()
+                for value in (completion_variants or {}).values()) + sum(
+                value.numel() * value.element_size()
+                for value in (pe_variants or {}).values()) + sum(
+                value.numel() * value.element_size()
+                for value in (boundary_replay_variants or {}).values())),
             default_residual_setting=DEFAULT_SETTING,
             residual_settings=[
                 dict(name=name, alpha=alpha, clip=clip)
@@ -1251,6 +1331,18 @@ class RoleFunctionalTextScreenMixin:
                             '_instance_diagnostic_slot']),
                     query_rows=pe_query_rows,
                 ) if pe_variants is not None else None),
+            boundary_replay_diagnosis=(
+                dict(
+                    schema_version=BOUNDARY_REPLAY_SCHEMA_VERSION,
+                    protocol=BOUNDARY_REPLAY_PROTOCOL,
+                    selected_combination=list(
+                        self._rpt_role_selection['_best_overall_slots']),
+                    selected_admission=self._rpt_role_selection[
+                        'best_overall']['admission'],
+                    variants=list(BOUNDARY_REPLAY_VARIANT_NAMES),
+                    query_rows=boundary_replay_query_rows,
+                    class_rows=boundary_replay_class_rows,
+                ) if boundary_replay_variants is not None else None),
             cuda_memory=dict(main=_cuda_memory_snapshot(self.device)),
         )
         primary = baseline_query['final'].to(self.device)
@@ -1269,6 +1361,9 @@ class RoleFunctionalTextScreenMixin:
                 completion_variants)
         if pe_variants is not None:
             components['role_prompt_pe_variant_class_logits'] = pe_variants
+        if boundary_replay_variants is not None:
+            components['role_prompt_boundary_replay_class_logits'] = (
+                boundary_replay_variants)
         stats = dict(
             view_id=view_id,
             crop_box=crop_box,
@@ -1310,6 +1405,107 @@ class RoleFunctionalTextScreenMixin:
             aacc=float(intersection.sum().item()
                        / gt_area.sum().clamp_min(1.0).item() * 100.0),
         )
+
+    def _rft_binary_boundary(self, mask):
+        mask = mask.bool()[None, None]
+        boundary = torch.zeros_like(mask)
+        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            boundary |= mask != self._rft_shift(mask.float(), dy, dx).bool()
+        return boundary.squeeze()
+
+    def _rft_enrich_boundary_queries(self, rows, crop_gt):
+        enriched = []
+        target_cache = {}
+        for source in rows:
+            row = dict(source)
+            before = row.pop('_before_support').bool()
+            after = row.pop('_after_support').bool()
+            key = (
+                int(row['class_index']), int(before.shape[-2]),
+                int(before.shape[-1]))
+            if key not in target_cache:
+                resized_gt = F.interpolate(
+                    crop_gt.float()[None, None], size=before.shape[-2:],
+                    mode='nearest').squeeze().long()
+                resized_valid = F.interpolate(
+                    (crop_gt != 255).float()[None, None],
+                    size=before.shape[-2:], mode='nearest').squeeze().bool()
+                target_cache[key] = (
+                    resized_valid,
+                    resized_valid & (resized_gt == int(row['class_index'])))
+            valid, target = target_cache[key]
+
+            def region_metrics(support):
+                support = support & valid
+                intersection = int((support & target).sum().item())
+                support_pixels = int(support.sum().item())
+                target_pixels = int(target.sum().item())
+                union = support_pixels + target_pixels - intersection
+                support_boundary = self._rft_binary_boundary(support) & valid
+                target_boundary = self._rft_binary_boundary(target) & valid
+                support_near = F.max_pool2d(
+                    support_boundary.float()[None, None], 3, stride=1,
+                    padding=1).squeeze().bool()
+                target_near = F.max_pool2d(
+                    target_boundary.float()[None, None], 3, stride=1,
+                    padding=1).squeeze().bool()
+                boundary_precision = _safe_div(
+                    int((support_boundary & target_near).sum().item()),
+                    int(support_boundary.sum().item()))
+                boundary_recall = _safe_div(
+                    int((target_boundary & support_near).sum().item()),
+                    int(target_boundary.sum().item()))
+                boundary_f1 = _safe_div(
+                    2.0 * boundary_precision * boundary_recall,
+                    boundary_precision + boundary_recall)
+                return dict(
+                    pixels=support_pixels,
+                    intersection=intersection,
+                    precision=_safe_div(intersection, support_pixels),
+                    recall=_safe_div(intersection, target_pixels),
+                    iou=_safe_div(intersection, union),
+                    boundary_precision=boundary_precision,
+                    boundary_recall=boundary_recall,
+                    boundary_f1=boundary_f1,
+                    boundary=self._rft_binary_boundary(support) & valid,
+                )
+
+            before_metrics = region_metrics(before)
+            after_metrics = region_metrics(after)
+            changed = valid & (before != after)
+            improved = changed & after & target
+            harmed = changed & after & ~target
+            recovered = changed & ~after & ~target
+            lost = changed & ~after & target
+            boundary_zone = F.max_pool2d(
+                (before_metrics['boundary'] | after_metrics['boundary'])
+                .float()[None, None], 3, stride=1,
+                padding=1).squeeze().bool()
+            row.update(
+                grid_gt_pixels=int(target.sum().item()),
+                grid_before_iou=before_metrics['iou'],
+                grid_after_iou=after_metrics['iou'],
+                grid_iou_delta=(after_metrics['iou']
+                                - before_metrics['iou']),
+                grid_before_precision=before_metrics['precision'],
+                grid_after_precision=after_metrics['precision'],
+                grid_before_recall=before_metrics['recall'],
+                grid_after_recall=after_metrics['recall'],
+                grid_before_boundary_f1=before_metrics['boundary_f1'],
+                grid_after_boundary_f1=after_metrics['boundary_f1'],
+                grid_boundary_f1_delta=(
+                    after_metrics['boundary_f1']
+                    - before_metrics['boundary_f1']),
+                grid_changed_pixels=int(changed.sum().item()),
+                grid_changed_outside_boundary_zone=int(
+                    (changed & ~boundary_zone).sum().item()),
+                grid_added_correct_pixels=int(improved.sum().item()),
+                grid_added_false_pixels=int(harmed.sum().item()),
+                grid_removed_false_pixels=int(recovered.sum().item()),
+                grid_removed_correct_pixels=int(lost.sum().item()),
+            )
+            enriched.append(row)
+        return enriched
 
     def _rpt_enrich_role_functional_stats_with_gt(self, view_stats, gt):
         enriched = []
@@ -1364,6 +1560,13 @@ class RoleFunctionalTextScreenMixin:
                 pe = dict(pe)
                 pe['query_rows'] = query_rows
                 view['pe_diagnosis'] = pe
+            boundary_replay = view.get('boundary_replay_diagnosis')
+            if boundary_replay is not None:
+                boundary_replay = dict(boundary_replay)
+                boundary_replay['query_rows'] = (
+                    self._rft_enrich_boundary_queries(
+                        boundary_replay.get('query_rows', []), crop_gt))
+                view['boundary_replay_diagnosis'] = boundary_replay
             enriched.append(view)
         return enriched
 
@@ -1415,6 +1618,69 @@ class RoleFunctionalTextScreenMixin:
             protocol=PE_PROTOCOL,
             selected_combination=list(
                 self._rpt_role_selection['_best_overall_slots']),
+            variants=rows,
+        )
+
+    def _rft_boundary_replay_record(
+            self, boundary_replay_variant_logits, gt, valid):
+        if boundary_replay_variant_logits is None:
+            return None
+        if (tuple(boundary_replay_variant_logits)
+                != BOUNDARY_REPLAY_VARIANT_NAMES):
+            raise RuntimeError('Recorded boundary/replay variants drifted.')
+        predictions = {
+            name: self._rpt_threshold(
+                value.detach().float().cpu()).to(torch.int16)
+            for name, value in boundary_replay_variant_logits.items()
+        }
+        gt_boundary = torch.zeros_like(valid)
+        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            shifted_gt = self._rft_shift(gt[None, None].float(), dy, dx)
+            shifted_valid = self._rft_shift(
+                valid[None, None].float(), dy, dx).bool()
+            gt_boundary |= (
+                valid & shifted_valid.squeeze()
+                & (gt != shifted_gt.squeeze().long()))
+        gt_boundary = F.max_pool2d(
+            gt_boundary.float()[None, None], 3, stride=1,
+            padding=1).squeeze().bool() & valid
+        rows = OrderedDict()
+        for name in BOUNDARY_REPLAY_VARIANT_NAMES:
+            reference_name = (
+                'br_official' if name.startswith('br_official_')
+                else 'br_best_full')
+            if name in ('br_official', 'br_best_full'):
+                reference_name = name
+            reference = predictions[reference_name]
+            prediction = predictions[name]
+            changed = valid & (prediction != reference)
+            improved = changed & (prediction == gt) & (reference != gt)
+            harmed = changed & (prediction != gt) & (reference == gt)
+            wrong_to_wrong = (
+                changed & (prediction != gt) & (reference != gt))
+            rows[name] = dict(
+                reference_variant=reference_name,
+                confusion=self._rpt_confusion(prediction, gt, valid),
+                changed_pixels=int(changed.sum().item()),
+                improved_pixels=int(improved.sum().item()),
+                harmed_pixels=int(harmed.sum().item()),
+                wrong_to_wrong_pixels=int(wrong_to_wrong.sum().item()),
+                help_minus_harm=(int(improved.sum().item())
+                                 - int(harmed.sum().item())),
+                changed_gt_boundary_pixels=int(
+                    (changed & gt_boundary).sum().item()),
+                improved_gt_boundary_pixels=int(
+                    (improved & gt_boundary).sum().item()),
+                harmed_gt_boundary_pixels=int(
+                    (harmed & gt_boundary).sum().item()),
+            )
+        return dict(
+            schema_version=BOUNDARY_REPLAY_SCHEMA_VERSION,
+            protocol=BOUNDARY_REPLAY_PROTOCOL,
+            selected_combination=list(
+                self._rpt_role_selection['_best_overall_slots']),
+            selected_admission=self._rpt_role_selection[
+                'best_overall']['admission'],
             variants=rows,
         )
 
@@ -1608,7 +1874,8 @@ class RoleFunctionalTextScreenMixin:
     def _rpt_record_image(
             self, variant_logits, view_stats, data_sample, image_path,
             pi_variant_logits=None, pi_mechanism_maps=None,
-            completion_variant_logits=None, pe_variant_logits=None):
+            completion_variant_logits=None, pe_variant_logits=None,
+            boundary_replay_variant_logits=None):
         if not self.dump_role_prompt_tta_stats:
             return
         if data_sample is None or not hasattr(data_sample, 'gt_sem_seg'):
@@ -1676,6 +1943,8 @@ class RoleFunctionalTextScreenMixin:
                 completion_variant_logits, variant_logits, gt, valid),
             pe_role_evidence=self._rft_pe_record(
                 pe_variant_logits, gt, valid),
+            boundary_replay=self._rft_boundary_replay_record(
+                boundary_replay_variant_logits, gt, valid),
         )
         self._rpt_write_stats(record)
         self._rpt_save_artifact(image_path, predictions, gt, valid)
