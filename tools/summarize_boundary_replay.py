@@ -16,6 +16,7 @@ if ROOT not in sys.path:
 from role_functional_text_definitions import (
     BOUNDARY_REPLAY_PROTOCOL,
     BOUNDARY_REPLAY_SCHEMA_VERSION,
+    BOUNDARY_REPLAY_TRACE_TOLERANCE,
     BOUNDARY_REPLAY_VARIANT_NAMES,
 )
 from tools.summarize_role_functional_text_screen import (
@@ -461,8 +462,9 @@ def main():
     replay_rows, replay_integrity = summarize_replay_integrity(records)
     mechanism_chain = build_mechanism_chain(variant_rows, query_summary)
     for row in replay_integrity:
-        if max(row['anchor_trace_max_abs'], row['anchor_replay_max_abs']) > (
-                args.integrity_tolerance):
+        if (row['anchor_trace_max_abs'] > BOUNDARY_REPLAY_TRACE_TOLERANCE
+                or row['anchor_replay_max_abs']
+                > args.integrity_tolerance):
             raise ValueError(
                 f"{row['dataset']}: replay integrity exceeded tolerance.")
     os.makedirs(args.out_dir, exist_ok=True)

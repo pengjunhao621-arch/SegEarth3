@@ -14,6 +14,7 @@ if ROOT not in sys.path:
 from role_functional_text_definitions import (
     BOUNDARY_GUIDES,
     BOUNDARY_REPLAY_VARIANT_NAMES,
+    BOUNDARY_REPLAY_TRACE_TOLERANCE,
     BOUNDARY_STRENGTHS,
     COMPLETION_PROTOCOL,
     DEFAULT_SETTING,
@@ -115,6 +116,7 @@ def static_checks():
     assert BOUNDARY_GUIDES == ('block23', 'rgb', 'uniform')
     assert tuple(value for _, value in BOUNDARY_STRENGTHS) == (
         0.25, 0.50, 1.00)
+    assert BOUNDARY_REPLAY_TRACE_TOLERANCE == 5e-3
     assert (len(set(BOUNDARY_REPLAY_VARIANT_NAMES))
             == len(BOUNDARY_REPLAY_VARIANT_NAMES))
     assert DEFAULT_SETTING == 'alpha050_clip025'

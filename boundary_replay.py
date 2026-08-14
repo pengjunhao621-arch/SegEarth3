@@ -14,6 +14,7 @@ from role_functional_text_definitions import (
     BOUNDARY_GUIDES,
     BOUNDARY_PRIMARY_STRENGTH,
     BOUNDARY_REPLAY_VARIANT_NAMES,
+    BOUNDARY_REPLAY_TRACE_TOLERANCE,
     BOUNDARY_STRENGTHS,
 )
 from sam3.model.data_misc import interpolate as sam3_interpolate
@@ -272,21 +273,68 @@ class BoundaryReplayMixin:
             prompt, prompt_mask)
         return self._br_package_from_outputs(outputs, output_shape)
 
-    def _br_check_anchor_replay(self, context, output_shape):
+    @staticmethod
+    def _br_reanchor_replay(candidate, replay_anchor, native_anchor, role):
+        """Keep only the target-text delta around the exact native anchor."""
+        if role == 'presence':
+            value = (
+                torch.as_tensor(native_anchor['presence']).float()
+                + torch.as_tensor(candidate['presence']).float()
+                - torch.as_tensor(replay_anchor['presence']).float()
+            ).clamp(0.0, 1.0)
+            return dict(presence=value.reshape(()))
+        if role == 'semantic':
+            value = (
+                native_anchor['semantic'].float()
+                + candidate['semantic'].float()
+                - replay_anchor['semantic'].float()
+            ).clamp(0.0, 1.0)
+            return dict(semantic=value)
+        if (candidate['raw_masks'].shape != replay_anchor['raw_masks'].shape
+                or candidate['raw_masks'].shape
+                != native_anchor['raw_masks'].shape
+                or candidate['raw_scores'].shape
+                != replay_anchor['raw_scores'].shape
+                or candidate['raw_scores'].shape
+                != native_anchor['raw_scores'].shape):
+            raise RuntimeError(
+                'Instance replay changed the native query tensor shape.')
+        return dict(
+            raw_masks=(
+                native_anchor['raw_masks'].float()
+                + candidate['raw_masks'].float()
+                - replay_anchor['raw_masks'].float()),
+            raw_scores=(
+                native_anchor['raw_scores'].float()
+                + candidate['raw_scores'].float()
+                - replay_anchor['raw_scores'].float()).clamp(0.0, 1.0),
+        )
+
+    def _br_check_anchor_replay(
+            self, context, native_anchor, output_shape):
         if self._br_anchor_replay_checked:
             return self._br_anchor_replay_max_abs
         prompt, prompt_mask = context['prompt'], context['prompt_mask']
-        anchor = context['package']
-        presence = self._br_replay_presence(context, prompt, prompt_mask)
-        instance = self._br_replay_instance(
-            context, prompt, prompt_mask, output_shape)
-        semantic = self._br_replay_semantic(
-            context, prompt, prompt_mask, output_shape)
+        replay_anchor = context['package']
+        presence = self._br_reanchor_replay(
+            dict(presence=self._br_replay_presence(
+                context, prompt, prompt_mask)),
+            replay_anchor, native_anchor, 'presence')
+        instance = self._br_reanchor_replay(
+            self._br_replay_instance(
+                context, prompt, prompt_mask, output_shape),
+            replay_anchor, native_anchor, 'instance')
+        semantic = self._br_reanchor_replay(
+            self._br_replay_semantic(
+                context, prompt, prompt_mask, output_shape),
+            replay_anchor, native_anchor, 'semantic')
         errors = [
-            float((presence - anchor['presence']).abs().item()),
             self._br_package_error(
-                instance, anchor, ('raw_masks', 'raw_scores')),
-            self._br_package_error(semantic, anchor, ('semantic',)),
+                presence, native_anchor, ('presence',)),
+            self._br_package_error(
+                instance, native_anchor, ('raw_masks', 'raw_scores')),
+            self._br_package_error(
+                semantic, native_anchor, ('semantic',)),
         ]
         self._br_anchor_replay_max_abs = max(errors)
         self._br_anchor_replay_checked = True
@@ -387,6 +435,7 @@ class BoundaryReplayMixin:
                 rows.append(row)
         return result, rows
 
+    @torch.inference_mode()
     def _br_class_variants(
             self, state, output_shape, class_index, class_name,
             official_prompts, official_packages, anchor, role_packages,
@@ -457,7 +506,7 @@ class BoundaryReplayMixin:
             trace_errors.append(self._br_package_error(
                 context['package'], package,
                 ('semantic', 'presence', 'raw_masks', 'raw_scores')))
-            self._br_check_anchor_replay(context, output_shape)
+            self._br_check_anchor_replay(context, package, output_shape)
             anchor_contexts.append(context)
 
         def tokens(prompt):
@@ -474,16 +523,19 @@ class BoundaryReplayMixin:
                 f'{role}_candidates'][slot - 1]
             prompt_tensor, prompt_mask = tokens(prompt)
             packages = []
-            for context in anchor_contexts:
+            for context, native_anchor in zip(
+                    anchor_contexts, official_packages):
                 if role == 'presence':
-                    packages.append(dict(presence=self._br_replay_presence(
-                        context, prompt_tensor, prompt_mask)))
+                    candidate = dict(presence=self._br_replay_presence(
+                        context, prompt_tensor, prompt_mask))
                 elif role == 'semantic':
-                    packages.append(self._br_replay_semantic(
-                        context, prompt_tensor, prompt_mask, output_shape))
+                    candidate = self._br_replay_semantic(
+                        context, prompt_tensor, prompt_mask, output_shape)
                 else:
-                    packages.append(self._br_replay_instance(
-                        context, prompt_tensor, prompt_mask, output_shape))
+                    candidate = self._br_replay_instance(
+                        context, prompt_tensor, prompt_mask, output_shape)
+                packages.append(self._br_reanchor_replay(
+                    candidate, context['package'], native_anchor, role))
             replay[role] = self._br_merge_replay_packages(packages, role)
 
         for role, name in (('presence', 'br_replay_p'),
@@ -569,8 +621,9 @@ class BoundaryReplayMixin:
             raise RuntimeError('Boundary/replay variant order drifted.')
         trace_error = max(trace_errors or [0.0])
         if (self.role_prompt_tta_strict_integrity
-                and max(trace_error, self._br_anchor_replay_max_abs)
-                > self.role_prompt_tta_integrity_tolerance):
+                and (trace_error > BOUNDARY_REPLAY_TRACE_TOLERANCE
+                     or self._br_anchor_replay_max_abs
+                     > self.role_prompt_tta_integrity_tolerance)):
             raise RuntimeError(
                 'Anchor-clamped replay integrity failed: '
                 f'trace={trace_error}, '
