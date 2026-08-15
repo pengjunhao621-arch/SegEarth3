@@ -16,6 +16,10 @@ from role_functional_text_definitions import (
     BOUNDARY_REPLAY_VARIANT_NAMES,
     BOUNDARY_REPLAY_TRACE_TOLERANCE,
     BOUNDARY_STRENGTHS,
+    CLASS_ROLE_ALIGNMENT_PE_LAYER,
+    CRA_COCO_WEIGHTS,
+    CRA_FCRA_TEMPERATURES,
+    CRA_VARIANT_NAMES,
     COMPLETION_PROTOCOL,
     DEFAULT_SETTING,
     PI_MECHANISM_MAP_NAMES,
@@ -47,6 +51,7 @@ def class_file(path):
 def static_checks():
     sources = (
         'boundary_replay.py',
+        'class_role_alignment.py',
         'role_functional_text_definitions.py',
         'role_functional_text_screen.py',
         'segearthov3_segmentor.py',
@@ -54,6 +59,7 @@ def static_checks():
         'tools/summarize_pi_role_compatibility.py',
         'tools/summarize_pe_role_evidence.py',
         'tools/summarize_boundary_replay.py',
+        'tools/summarize_class_role_alignment.py',
     )
     for relative in sources:
         path = os.path.join(ROOT, relative)
@@ -119,6 +125,11 @@ def static_checks():
     assert BOUNDARY_REPLAY_TRACE_TOLERANCE == 5e-3
     assert (len(set(BOUNDARY_REPLAY_VARIANT_NAMES))
             == len(BOUNDARY_REPLAY_VARIANT_NAMES))
+    assert CLASS_ROLE_ALIGNMENT_PE_LAYER == 18
+    assert tuple(value for _, value in CRA_COCO_WEIGHTS) == (
+        0.30, 0.50, 0.70, 0.90)
+    assert tuple(value for _, value in CRA_FCRA_TEMPERATURES) == (0.05, 0.10)
+    assert len(set(CRA_VARIANT_NAMES)) == len(CRA_VARIANT_NAMES)
     assert DEFAULT_SETTING == 'alpha050_clip025'
     assert len(RESIDUAL_SETTINGS) == 5
     report['checks'] = [
@@ -136,6 +147,9 @@ def static_checks():
         'best overall and best all-nonzero role compositions are registered',
         'boundary replay keeps block23/RGB/uniform controls and three fixed strengths',
         'anchor-clamped replay has separate P/S/I/all counterfactual paths',
+        'class-role alignment reads PE block18 once and preserves fixed admission',
+        'CoCo class calibration excludes synonym expansion and double Presence',
+        'FCRA compares raw role difference with class-centered role evidence',
         'RemoteCLIP, CLIP APIs, training and online candidate selection are absent',
     ]
     return report

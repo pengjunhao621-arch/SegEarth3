@@ -15,6 +15,30 @@ PE_SCHEMA_VERSION = 1
 BOUNDARY_REPLAY_PROTOCOL = 'boundary_replay_v1'
 BOUNDARY_REPLAY_SCHEMA_VERSION = 1
 BOUNDARY_REPLAY_TRACE_TOLERANCE = 5e-3
+CLASS_ROLE_ALIGNMENT_PROTOCOL = 'class_role_alignment_v1'
+CLASS_ROLE_ALIGNMENT_SCHEMA_VERSION = 1
+CLASS_ROLE_ALIGNMENT_PE_LAYER = 18
+
+CRA_COCO_WEIGHTS = (
+    ('l030', 0.30),
+    ('l050', 0.50),
+    ('l070', 0.70),
+    ('l090', 0.90),
+)
+CRA_FCRA_TEMPERATURES = (
+    ('t005', 0.05),
+    ('t010', 0.10),
+)
+CRA_VARIANT_NAMES = (
+    'cra_official',
+    'cra_best_full',
+    *(f'cra_{base}_coco_{weight}'
+      for base in ('official', 'best')
+      for weight, _ in CRA_COCO_WEIGHTS),
+    *(f'cra_best_fcra_{evidence}_{temperature}'
+      for evidence in ('d', 'gamma')
+      for temperature, _ in CRA_FCRA_TEMPERATURES),
+)
 
 PE_LAYER_IDS = (7, 15, 23, 31)
 PE_FEATURE_NAMES = (

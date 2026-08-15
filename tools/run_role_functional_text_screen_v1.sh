@@ -2,7 +2,9 @@
 set -euo pipefail
 
 MODE="${1:-smoke}"
-if [[ "${MODE}" == boundary-replay-* ]]; then
+if [[ "${MODE}" == class-role-alignment-* ]]; then
+    ROOT="${ROOT:-logs/class_role_alignment_v1}"
+elif [[ "${MODE}" == boundary-replay-* ]]; then
     ROOT="${ROOT:-logs/boundary_replay_v1}"
 elif [[ "${MODE}" == pe-* ]]; then
     ROOT="${ROOT:-logs/pe_role_evidence_v1}"
@@ -96,6 +98,8 @@ collect() {
             echo "[pe-role-evidence-v1] ${dataset} -> ${out_dir}"
         elif [[ "${experiment_mode}" == "boundary-replay" ]]; then
             echo "[boundary-replay-v1] ${dataset} -> ${out_dir}"
+        elif [[ "${experiment_mode}" == "class-role-alignment" ]]; then
+            echo "[class-role-alignment-v1] ${dataset} -> ${out_dir}"
         elif [[ "${experiment_mode}" == "pi" ]]; then
             echo "[pi-role-compatibility-v1] ${dataset} -> ${out_dir}"
         elif [[ "${experiment_mode}" == "completion" ]]; then
@@ -119,6 +123,12 @@ collect() {
             common_options+=(
                 model.role_prompt_tta_prompt_bank="configs/prompt_banks/role_functional_text_v2/${dataset}.json"
                 model.role_prompt_tta_boundary_replay_diagnosis=True
+                model.role_prompt_tta_selection_registry="configs/experiments/role_text_selections_v1.json"
+            )
+        elif [[ "${experiment_mode}" == "class-role-alignment" ]]; then
+            common_options+=(
+                model.role_prompt_tta_prompt_bank="configs/prompt_banks/role_functional_text_v2/${dataset}.json"
+                model.role_prompt_tta_class_role_alignment=True
                 model.role_prompt_tta_selection_registry="configs/experiments/role_text_selections_v1.json"
             )
         elif [[ "${experiment_mode}" == "pi" ]]; then
@@ -166,6 +176,8 @@ summarize() {
         summarizer="tools/summarize_pe_role_evidence.py"
     elif [[ "${experiment_mode}" == "boundary-replay" ]]; then
         summarizer="tools/summarize_boundary_replay.py"
+    elif [[ "${experiment_mode}" == "class-role-alignment" ]]; then
+        summarizer="tools/summarize_class_role_alignment.py"
     elif [[ "${experiment_mode}" == "pi" ]]; then
         summarizer="tools/summarize_pi_role_compatibility.py"
     fi
@@ -253,8 +265,22 @@ case "${MODE}" in
         collect full boundary-replay
         summarize boundary-replay
         ;;
+    class-role-alignment-smoke)
+        collect smoke class-role-alignment
+        summarize class-role-alignment
+        ;;
+    class-role-alignment-collect-all)
+        collect full class-role-alignment
+        ;;
+    class-role-alignment-summarize)
+        summarize class-role-alignment
+        ;;
+    class-role-alignment-all)
+        collect full class-role-alignment
+        summarize class-role-alignment
+        ;;
     *)
-        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all|completion-smoke|completion-collect-all|completion-summarize|completion-all|pe-smoke|pe-collect-all|pe-summarize|pe-all|boundary-replay-smoke|boundary-replay-collect-all|boundary-replay-summarize|boundary-replay-all}" >&2
+        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all|completion-smoke|completion-collect-all|completion-summarize|completion-all|pe-smoke|pe-collect-all|pe-summarize|pe-all|boundary-replay-smoke|boundary-replay-collect-all|boundary-replay-summarize|boundary-replay-all|class-role-alignment-smoke|class-role-alignment-collect-all|class-role-alignment-summarize|class-role-alignment-all}" >&2
         exit 2
         ;;
 esac

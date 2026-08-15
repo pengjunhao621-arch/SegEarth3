@@ -16,6 +16,7 @@ from mmseg.registry import MODELS
 from PIL import Image
 
 from boundary_replay import BoundaryReplayMixin
+from class_role_alignment import ClassRoleAlignmentMixin
 from role_functional_text_screen import RoleFunctionalTextScreenMixin
 from sam3 import build_sam3_image_model
 from sam3.model.data_misc import interpolate as sam3_interpolate
@@ -24,7 +25,8 @@ from sam3.model.sam3_image_processor import Sam3Processor
 
 @MODELS.register_module()
 class SegEarthOV3Segmentation(
-        BoundaryReplayMixin, RoleFunctionalTextScreenMixin, BaseSegmentor):
+        ClassRoleAlignmentMixin, BoundaryReplayMixin,
+        RoleFunctionalTextScreenMixin, BaseSegmentor):
     """Frozen SAM3 segmentor with one config-gated diagnostic extension."""
 
     def __init__(
@@ -59,6 +61,7 @@ class SegEarthOV3Segmentation(
             role_prompt_tta_completion_diagnosis=False,
             role_prompt_tta_pe_diagnosis=False,
             role_prompt_tta_boundary_replay_diagnosis=False,
+            role_prompt_tta_class_role_alignment=False,
             role_prompt_tta_selection_registry=None,
             **kwargs):
         super().__init__()
@@ -133,6 +136,8 @@ class SegEarthOV3Segmentation(
                 role_prompt_tta_pe_diagnosis),
             role_prompt_tta_boundary_replay_diagnosis=(
                 role_prompt_tta_boundary_replay_diagnosis),
+            role_prompt_tta_class_role_alignment=(
+                role_prompt_tta_class_role_alignment),
             role_prompt_tta_selection_registry=(
                 role_prompt_tta_selection_registry),
         )
@@ -307,6 +312,16 @@ class SegEarthOV3Segmentation(
             if role_predictions is not None
             and self._rpt_uses_boundary_replay()
             else None)
+        class_role_alignment_predictions = (
+            {
+                name: torch.zeros(
+                    (self.num_cls, image_height, image_width),
+                    dtype=torch.float32, device='cpu')
+                for name in self._cra_variant_names()
+            }
+            if role_predictions is not None
+            and self._rpt_uses_class_role_alignment()
+            else None)
 
         height_grids = (
             max(image_height - height_crop + height_stride - 1, 0)
@@ -373,6 +388,12 @@ class SegEarthOV3Segmentation(
                                     'role_prompt_boundary_replay_class_logits'
                             ].items():
                                 boundary_replay_predictions[name][
+                                    :, y1:y2, x1:x2] += value
+                        if class_role_alignment_predictions is not None:
+                            for name, value in crop_components[
+                                    'role_prompt_class_role_alignment_logits'
+                            ].items():
+                                class_role_alignment_predictions[name][
                                     :, y1:y2, x1:x2] += value
 
         if torch.any(counts == 0):
@@ -455,6 +476,19 @@ class SegEarthOV3Segmentation(
                     exact_baseline.clone())
                 components['role_prompt_boundary_replay_class_logits'] = (
                     boundary_replay_predictions)
+            if class_role_alignment_predictions is not None:
+                alignment_anchor = (
+                    class_role_alignment_predictions['cra_official']
+                    / cpu_counts)
+                for name in class_role_alignment_predictions:
+                    class_role_alignment_predictions[name] = (
+                        exact_baseline
+                        + class_role_alignment_predictions[name] / cpu_counts
+                        - alignment_anchor).clamp(0.0, 1.0)
+                class_role_alignment_predictions['cra_official'] = (
+                    exact_baseline.clone())
+                components['role_prompt_class_role_alignment_logits'] = (
+                    class_role_alignment_predictions)
         return predictions, components
 
     def predict(self, inputs, data_samples):
@@ -557,6 +591,19 @@ class SegEarthOV3Segmentation(
                                 mode='bilinear',
                                 align_corners=False,
                             ).squeeze(0)
+                    if ('role_prompt_class_role_alignment_logits'
+                            in components):
+                        for name, value in components[
+                                'role_prompt_class_role_alignment_logits'
+                        ].items():
+                            components[
+                                'role_prompt_class_role_alignment_logits'
+                            ][name] = F.interpolate(
+                                value.unsqueeze(0),
+                                size=original_shape,
+                                mode='bilinear',
+                                align_corners=False,
+                            ).squeeze(0)
 
             class_logits = self._aggregate_query_logits_to_classes(
                 query_logits)
@@ -580,6 +627,8 @@ class SegEarthOV3Segmentation(
                         'role_prompt_pe_variant_class_logits'),
                     boundary_replay_variant_logits=components.get(
                         'role_prompt_boundary_replay_class_logits'),
+                    class_role_alignment_logits=components.get(
+                        'role_prompt_class_role_alignment_logits'),
                 )
             data_sample.set_data({
                 'seg_logits': PixelData(data=class_logits),

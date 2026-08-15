@@ -13,6 +13,10 @@ from role_functional_text_definitions import (
     BOUNDARY_REPLAY_PROTOCOL,
     BOUNDARY_REPLAY_SCHEMA_VERSION,
     BOUNDARY_REPLAY_VARIANT_NAMES,
+    CLASS_ROLE_ALIGNMENT_PE_LAYER,
+    CLASS_ROLE_ALIGNMENT_PROTOCOL,
+    CLASS_ROLE_ALIGNMENT_SCHEMA_VERSION,
+    CRA_VARIANT_NAMES,
     COMPLETION_PROTOCOL,
     COMPLETION_SCHEMA_VERSION,
     DEFAULT_SETTING,
@@ -90,6 +94,7 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_completion_diagnosis=False,
             role_prompt_tta_pe_diagnosis=False,
             role_prompt_tta_boundary_replay_diagnosis=False,
+            role_prompt_tta_class_role_alignment=False,
             role_prompt_tta_selection_registry=None,
             **kwargs):
         self.use_role_prompt_tta = bool(use_role_prompt_tta)
@@ -122,6 +127,8 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_pe_diagnosis)
         self.role_prompt_tta_boundary_replay_diagnosis = bool(
             role_prompt_tta_boundary_replay_diagnosis)
+        self.role_prompt_tta_class_role_alignment = bool(
+            role_prompt_tta_class_role_alignment)
         self.role_prompt_tta_selection_registry = (
             role_prompt_tta_selection_registry)
         self._role_prompt_tta_stats_file = None
@@ -169,10 +176,11 @@ class RoleFunctionalTextScreenMixin:
             raise ValueError(
                 'Completion diagnosis requires prompt-bank completion metadata.')
         if (self.role_prompt_tta_pe_diagnosis
-                or self.role_prompt_tta_boundary_replay_diagnosis):
+                or self.role_prompt_tta_boundary_replay_diagnosis
+                or self.role_prompt_tta_class_role_alignment):
             if not role_prompt_tta_selection_registry:
                 raise ValueError(
-                    'PE/boundary replay diagnosis requires '
+                    'PE/boundary/class-role diagnosis requires '
                     'role_prompt_tta_selection_registry.')
             self._rpt_role_selection = load_role_text_selection_registry(
                 role_prompt_tta_selection_registry,
@@ -193,7 +201,9 @@ class RoleFunctionalTextScreenMixin:
             or getattr(self, 'role_prompt_tta_completion_diagnosis', False)
             or getattr(self, 'role_prompt_tta_pe_diagnosis', False)
             or getattr(
-                self, 'role_prompt_tta_boundary_replay_diagnosis', False))
+                self, 'role_prompt_tta_boundary_replay_diagnosis', False)
+            or getattr(
+                self, 'role_prompt_tta_class_role_alignment', False))
 
     @staticmethod
     def _rpt_uses_class_space_variants():
@@ -212,6 +222,10 @@ class RoleFunctionalTextScreenMixin:
     def _rpt_uses_boundary_replay(self):
         return bool(getattr(
             self, 'role_prompt_tta_boundary_replay_diagnosis', False))
+
+    def _rpt_uses_class_role_alignment(self):
+        return bool(getattr(
+            self, 'role_prompt_tta_class_role_alignment', False))
 
     @staticmethod
     def _rpt_pe_variant_names():
@@ -245,14 +259,21 @@ class RoleFunctionalTextScreenMixin:
     def _rpt_set_image_with_pe_features(self, image):
         """Encode one image and capture four true PE/ViT block outputs."""
         if (not self._rpt_uses_pe_diagnosis()
-                and not self._rpt_uses_boundary_replay()):
+                and not self._rpt_uses_boundary_replay()
+                and not self._rpt_uses_class_role_alignment()):
             with torch.no_grad(), self._rpt_autocast_context():
                 return self.processor.set_image(image), None
         trunk = self.processor.model.backbone.vision_backbone.trunk
         captured = {}
         handles = []
-        layer_ids = (
-            PE_LAYER_IDS if self._rpt_uses_pe_diagnosis() else (23,))
+        layer_ids = set()
+        if self._rpt_uses_pe_diagnosis():
+            layer_ids.update(PE_LAYER_IDS)
+        if self._rpt_uses_boundary_replay():
+            layer_ids.add(23)
+        if self._rpt_uses_class_role_alignment():
+            layer_ids.add(CLASS_ROLE_ALIGNMENT_PE_LAYER)
+        layer_ids = tuple(sorted(layer_ids))
         for layer_id in layer_ids:
             def capture(_module, _inputs, output, layer_id=layer_id):
                 captured[layer_id] = output.detach()
@@ -282,13 +303,15 @@ class RoleFunctionalTextScreenMixin:
             final = state['backbone_out']['vision_features']
             features['fpn_final'] = F.normalize(
                 final.float(), dim=1, eps=1e-6)
-        rgb = torch.from_numpy(
-            np.asarray(image, dtype=np.float32).copy()).permute(2, 0, 1)
-        rgb = rgb.unsqueeze(0).to(self.device) / 255.0
-        features['rgb'] = F.normalize(F.interpolate(
-            rgb, size=next(iter(features.values())).shape[-2:],
-            mode='bilinear',
-            align_corners=False), dim=1, eps=1e-6)
+        if (self._rpt_uses_pe_diagnosis()
+                or self._rpt_uses_boundary_replay()):
+            rgb = torch.from_numpy(
+                np.asarray(image, dtype=np.float32).copy()).permute(2, 0, 1)
+            rgb = rgb.unsqueeze(0).to(self.device) / 255.0
+            features['rgb'] = F.normalize(F.interpolate(
+                rgb, size=next(iter(features.values())).shape[-2:],
+                mode='bilinear',
+                align_corners=False), dim=1, eps=1e-6)
         return state, features
 
     @staticmethod
@@ -400,6 +423,9 @@ class RoleFunctionalTextScreenMixin:
         ]
         prompts = list(dict.fromkeys(list(self.query_words) + bank_prompts))
         index = {prompt: idx for idx, prompt in enumerate(prompts)}
+        alignment_embeddings = (
+            torch.empty((len(prompts), 1024), device=self.device)
+            if self._rpt_uses_class_role_alignment() else None)
         with torch.no_grad(), self._rpt_autocast_context():
             encoded = self.processor.model.backbone.forward_text(
                 prompts, device=self.device)
@@ -407,18 +433,42 @@ class RoleFunctionalTextScreenMixin:
             language_mask = encoded['language_mask'].detach().clone()
             # Independent encoding preserves native single-concept grounding.
             for prompt in prompts:
-                single = self.processor.model.backbone.forward_text(
-                    [prompt], device=self.device)
+                captured = {}
+                handle = None
+                if alignment_embeddings is not None:
+                    resizer = self.processor.model.backbone.language_backbone.resizer
+
+                    def capture_resizer_input(_module, inputs):
+                        captured['tokens'] = inputs[0].detach()
+
+                    handle = resizer.register_forward_pre_hook(
+                        capture_resizer_input)
+                try:
+                    single = self.processor.model.backbone.forward_text(
+                        [prompt], device=self.device)
+                finally:
+                    if handle is not None:
+                        handle.remove()
                 prompt_index = index[prompt]
                 language_features[:, prompt_index:prompt_index + 1] = (
                     single['language_features'])
                 language_mask[prompt_index:prompt_index + 1] = (
                     single['language_mask'])
+                if alignment_embeddings is not None:
+                    tokens = captured['tokens'][:, 0].float()
+                    valid = ~single['language_mask'][0].bool()
+                    pooled = tokens[valid].mean(dim=0)
+                    alignment_embeddings[prompt_index].copy_(
+                        F.normalize(pooled, dim=0, eps=1e-6))
         self._rpt_text_cache = dict(
             prompts=prompts,
             index=index,
             language_features=language_features,
             language_mask=language_mask,
+            alignment_embeddings=alignment_embeddings,
+            alignment_pooling=(
+                'valid_token_mean_post_transformer_pre_resizer'
+                if alignment_embeddings is not None else None),
         )
         return self._rpt_text_cache
 
@@ -877,6 +927,10 @@ class RoleFunctionalTextScreenMixin:
                     (self.num_cls, height, width), dtype=torch.float32,
                     device='cpu'))
                 for name in BOUNDARY_REPLAY_VARIANT_NAMES)
+        class_role_alignment_variants = None
+        class_role_alignment_inputs = []
+        class_role_alignment_expected = []
+        class_role_alignment_diagnosis = None
         settings = {
             name: (float(alpha), float(clip))
             for name, alpha, clip in RESIDUAL_SETTINGS
@@ -886,6 +940,7 @@ class RoleFunctionalTextScreenMixin:
         class_rows = []
         recomposition_errors = []
         boundary_selection_errors = []
+        class_role_alignment_selection_error = 0.0
         query_indices = self.query_idx.detach().long().cpu()
 
         for class_index, item in enumerate(self._rpt_prompt_bank['classes']):
@@ -1155,6 +1210,59 @@ class RoleFunctionalTextScreenMixin:
                 boundary_replay_query_rows.extend(query_rows)
                 boundary_replay_class_rows.append(diagnostic_row)
 
+            if self._rpt_uses_class_role_alignment():
+                selected_slots = self._rpt_role_selection[
+                    '_best_overall_slots']
+                selected_admission = self._rpt_role_selection[
+                    'best_overall']['admission']
+                role_embeddings = {}
+                role_fields = dict(
+                    presence='presence_candidates',
+                    semantic='semantic_candidates',
+                    instance='instance_candidates')
+                anchor_embedding = self._cra_pool_embedding([
+                    cache['alignment_embeddings'][cache['index'][prompt]]
+                    for prompt in item['official_prompts']])
+                selected_prompts = {}
+                for role, slot in zip(
+                        ('presence', 'semantic', 'instance'), selected_slots):
+                    if slot:
+                        prompt = item[role_fields[role]][slot - 1]
+                        selected_prompts[role] = prompt
+                        role_embeddings[role] = cache[
+                            'alignment_embeddings'][cache['index'][prompt]]
+                    else:
+                        selected_prompts[role] = list(
+                            item['official_prompts'])
+                        role_embeddings[role] = anchor_embedding
+                p_slot, s_slot, i_slot = selected_slots
+                class_role_alignment_inputs.append(dict(
+                    class_name=item['name'],
+                    selected_slots=selected_slots,
+                    selected_prompts=selected_prompts,
+                    official_prompts=list(item['official_prompts']),
+                    selected_admission=selected_admission,
+                    anchor_embedding=anchor_embedding,
+                    presence_embedding=role_embeddings['presence'],
+                    semantic_embedding=role_embeddings['semantic'],
+                    instance_embedding=role_embeddings['instance'],
+                    official_final=official_final,
+                    role_anchor_final=role_anchor_final,
+                    anchor_package=anchor,
+                    anchor_presence=anchor_presence,
+                    anchor_semantic=anchor_semantic,
+                    presence_package=(
+                        role_packages['presence'][p_slot] if p_slot else None),
+                    semantic_package=(
+                        role_packages['semantic'][s_slot] if s_slot else None),
+                    instance_package=(
+                        role_packages['instance'][i_slot] if i_slot else None),
+                ))
+                class_role_alignment_expected.append(compose(
+                    *selected_slots,
+                    anchor_admission=(
+                        selected_admission == 'anchor_admission')))
+
             for presence_slot in range(3):
                 for semantic_slot in range(4):
                     for instance_slot in range(3):
@@ -1196,6 +1304,20 @@ class RoleFunctionalTextScreenMixin:
                     role_anchor_final - official_final
                 ).abs().max().item()),
             ))
+
+        if self._rpt_uses_class_role_alignment():
+            with torch.no_grad():
+                (class_role_alignment_variants,
+                 class_role_alignment_diagnosis) = self._cra_build_variants(
+                    class_role_alignment_inputs,
+                    pe_features[f'block{CLASS_ROLE_ALIGNMENT_PE_LAYER:02d}'],
+                    output_shape, default_alpha, default_clip)
+            expected_selected = torch.stack(class_role_alignment_expected)
+            class_role_alignment_selection_error = max(
+                float((class_role_alignment_variants['cra_official']
+                       - variants['baseline']).abs().max().item()),
+                float((class_role_alignment_variants['cra_best_full']
+                       - expected_selected).abs().max().item()))
 
         identity_error = float((
             variants['combo_p0_s0_i0'] - variants['baseline']
@@ -1240,10 +1362,15 @@ class RoleFunctionalTextScreenMixin:
                 and tuple(boundary_replay_variants)
                 != BOUNDARY_REPLAY_VARIANT_NAMES):
             raise RuntimeError('Boundary/replay variant order drifted.')
+        if (class_role_alignment_variants is not None
+                and tuple(class_role_alignment_variants)
+                != CRA_VARIANT_NAMES):
+            raise RuntimeError('Class-role alignment variant order drifted.')
         if (self.role_prompt_tta_strict_integrity
                 and max(identity_error, recomposition_error,
                         pi_identity_error, pi_replay_match_error,
-                        completion_noop_error, boundary_selection_error)
+                        completion_noop_error, boundary_selection_error,
+                        class_role_alignment_selection_error)
                 > self.role_prompt_tta_integrity_tolerance):
             raise RuntimeError(
                 'Role-functional integrity failed: '
@@ -1252,6 +1379,7 @@ class RoleFunctionalTextScreenMixin:
                 f'pi_replay_match={pi_replay_match_error}, '
                 f'completion_noop={completion_noop_error}, '
                 f'boundary_selection={boundary_selection_error}, '
+                f'class_role_selection={class_role_alignment_selection_error}, '
                 f'native_recomposition={recomposition_error}.')
 
         view_stats = dict(
@@ -1270,12 +1398,15 @@ class RoleFunctionalTextScreenMixin:
             completion_noop_max_abs=completion_noop_error,
             native_recomposition_max_abs=recomposition_error,
             boundary_selection_max_abs=boundary_selection_error,
+            class_role_alignment_selection_max_abs=(
+                class_role_alignment_selection_error),
             official_query_count=int(self.num_queries),
             canonical_class_count=int(self.num_cls),
             diagnostic_variant_count=(
                 len(variants) + len(completion_variants or {})
                 + len(pe_variants or {})
-                + len(boundary_replay_variants or {})),
+                + len(boundary_replay_variants or {})
+                + len(class_role_alignment_variants or {})),
             diagnostic_cpu_bytes=int(sum(
                 value.numel() * value.element_size()
                 for value in variants.values()) + sum(
@@ -1284,7 +1415,9 @@ class RoleFunctionalTextScreenMixin:
                 value.numel() * value.element_size()
                 for value in (pe_variants or {}).values()) + sum(
                 value.numel() * value.element_size()
-                for value in (boundary_replay_variants or {}).values())),
+                for value in (boundary_replay_variants or {}).values()) + sum(
+                value.numel() * value.element_size()
+                for value in (class_role_alignment_variants or {}).values())),
             default_residual_setting=DEFAULT_SETTING,
             residual_settings=[
                 dict(name=name, alpha=alpha, clip=clip)
@@ -1343,6 +1476,19 @@ class RoleFunctionalTextScreenMixin:
                     query_rows=boundary_replay_query_rows,
                     class_rows=boundary_replay_class_rows,
                 ) if boundary_replay_variants is not None else None),
+            class_role_alignment_diagnosis=(
+                dict(
+                    schema_version=CLASS_ROLE_ALIGNMENT_SCHEMA_VERSION,
+                    protocol=CLASS_ROLE_ALIGNMENT_PROTOCOL,
+                    pe_layer=int(CLASS_ROLE_ALIGNMENT_PE_LAYER),
+                    text_embedding_source=cache['alignment_pooling'],
+                    selected_combination=list(
+                        self._rpt_role_selection['_best_overall_slots']),
+                    selected_admission=self._rpt_role_selection[
+                        'best_overall']['admission'],
+                    variants=list(CRA_VARIANT_NAMES),
+                    **class_role_alignment_diagnosis,
+                ) if class_role_alignment_variants is not None else None),
             cuda_memory=dict(main=_cuda_memory_snapshot(self.device)),
         )
         primary = baseline_query['final'].to(self.device)
@@ -1364,6 +1510,9 @@ class RoleFunctionalTextScreenMixin:
         if boundary_replay_variants is not None:
             components['role_prompt_boundary_replay_class_logits'] = (
                 boundary_replay_variants)
+        if class_role_alignment_variants is not None:
+            components['role_prompt_class_role_alignment_logits'] = (
+                class_role_alignment_variants)
         stats = dict(
             view_id=view_id,
             crop_box=crop_box,
@@ -1567,6 +1716,12 @@ class RoleFunctionalTextScreenMixin:
                     self._rft_enrich_boundary_queries(
                         boundary_replay.get('query_rows', []), crop_gt))
                 view['boundary_replay_diagnosis'] = boundary_replay
+            class_role_alignment = view.get(
+                'class_role_alignment_diagnosis')
+            if class_role_alignment is not None:
+                view['class_role_alignment_diagnosis'] = (
+                    self._cra_enrich_actions(
+                        class_role_alignment, crop_gt))
             enriched.append(view)
         return enriched
 
@@ -1875,7 +2030,8 @@ class RoleFunctionalTextScreenMixin:
             self, variant_logits, view_stats, data_sample, image_path,
             pi_variant_logits=None, pi_mechanism_maps=None,
             completion_variant_logits=None, pe_variant_logits=None,
-            boundary_replay_variant_logits=None):
+            boundary_replay_variant_logits=None,
+            class_role_alignment_logits=None):
         if not self.dump_role_prompt_tta_stats:
             return
         if data_sample is None or not hasattr(data_sample, 'gt_sem_seg'):
@@ -1945,6 +2101,8 @@ class RoleFunctionalTextScreenMixin:
                 pe_variant_logits, gt, valid),
             boundary_replay=self._rft_boundary_replay_record(
                 boundary_replay_variant_logits, gt, valid),
+            class_role_alignment=self._cra_record(
+                class_role_alignment_logits, gt, valid),
         )
         self._rpt_write_stats(record)
         self._rpt_save_artifact(image_path, predictions, gt, valid)
