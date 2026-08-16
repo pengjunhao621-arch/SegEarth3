@@ -1,8 +1,7 @@
-"""SegEarth-OV3 semantic segmentation baseline and active text-role screen.
+"""SegEarth-OV3 baseline with config-gated role-text/visual-field screens.
 
-The official SAM3 inference path is the default.  The only optional research
-path retained here is ``role_functional_text_screen_v1``; it returns the exact
-baseline prediction while recording alternative role-specific text variants.
+The official SAM3 inference path remains the default. Optional experiments
+return that protected prediction while recording counterfactual variants.
 """
 
 import os
@@ -18,6 +17,7 @@ from PIL import Image
 from boundary_replay import BoundaryReplayMixin
 from class_role_alignment import ClassRoleAlignmentMixin
 from role_functional_text_screen import RoleFunctionalTextScreenMixin
+from role_visual_field import RoleVisualFieldMixin
 from sam3 import build_sam3_image_model
 from sam3.model.data_misc import interpolate as sam3_interpolate
 from sam3.model.sam3_image_processor import Sam3Processor
@@ -25,7 +25,7 @@ from sam3.model.sam3_image_processor import Sam3Processor
 
 @MODELS.register_module()
 class SegEarthOV3Segmentation(
-        ClassRoleAlignmentMixin, BoundaryReplayMixin,
+        RoleVisualFieldMixin, ClassRoleAlignmentMixin, BoundaryReplayMixin,
         RoleFunctionalTextScreenMixin, BaseSegmentor):
     """Frozen SAM3 segmentor with one config-gated diagnostic extension."""
 
@@ -62,6 +62,8 @@ class SegEarthOV3Segmentation(
             role_prompt_tta_pe_diagnosis=False,
             role_prompt_tta_boundary_replay_diagnosis=False,
             role_prompt_tta_class_role_alignment=False,
+            role_prompt_tta_visual_field_diagnosis=False,
+            role_prompt_tta_visual_field_registry=None,
             role_prompt_tta_selection_registry=None,
             **kwargs):
         super().__init__()
@@ -138,10 +140,18 @@ class SegEarthOV3Segmentation(
                 role_prompt_tta_boundary_replay_diagnosis),
             role_prompt_tta_class_role_alignment=(
                 role_prompt_tta_class_role_alignment),
+            role_prompt_tta_visual_field_diagnosis=(
+                role_prompt_tta_visual_field_diagnosis),
             role_prompt_tta_selection_registry=(
                 role_prompt_tta_selection_registry),
         )
         self._br_initialize()
+        self._rvf_initialize(
+            role_prompt_tta_visual_field_diagnosis=(
+                role_prompt_tta_visual_field_diagnosis),
+            role_prompt_tta_visual_field_registry=(
+                role_prompt_tta_visual_field_registry),
+        )
 
     def _get_instance_score(self, state, instance_index):
         if self.instance_score_type == 'raw':
@@ -499,6 +509,32 @@ class SegEarthOV3Segmentation(
             image_path = meta.get('img_path')
             image = Image.open(image_path).convert('RGB')
             original_shape = tuple(meta['ori_shape'][:2])
+            if self._uses_role_visual_field():
+                query_logits, variants, metadata = self._rvf_predict_image(
+                    image, image_path)
+                class_logits = self._aggregate_query_logits_to_classes(
+                    query_logits)
+                if class_logits.shape[-2:] != original_shape:
+                    class_logits = F.interpolate(
+                        class_logits.unsqueeze(0), size=original_shape,
+                        mode='bilinear', align_corners=False).squeeze(0)
+                    variants = {
+                        name: F.interpolate(
+                            value.unsqueeze(0), size=original_shape,
+                            mode='bilinear', align_corners=False).squeeze(0)
+                        for name, value in variants.items()
+                    }
+                prediction = class_logits.argmax(dim=0)
+                prediction[class_logits.max(dim=0)[0] < self.prob_thd] = (
+                    self.bg_idx)
+                self._rvf_record_image(
+                    variants, metadata, data_sample, image_path)
+                data_sample.set_data({
+                    'seg_logits': PixelData(data=class_logits),
+                    'pred_sem_seg': PixelData(data=prediction.unsqueeze(0)),
+                })
+                continue
+
             needs_components = self._uses_role_prompt_tta()
 
             use_sliding = (

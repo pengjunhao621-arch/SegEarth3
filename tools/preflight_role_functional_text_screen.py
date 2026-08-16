@@ -29,6 +29,9 @@ from role_functional_text_definitions import (
     PROTOCOL,
     RESIDUAL_SETTINGS,
     ROLE_FIELDS,
+    ROLE_VISUAL_FIELD_COMPOSITIONS,
+    ROLE_VISUAL_FIELD_PROTOCOL,
+    ROLE_VISUAL_FIELD_VARIANT_NAMES,
     VARIANT_NAMES,
     load_role_functional_text_bank,
     load_role_text_selection_registry,
@@ -54,12 +57,16 @@ def static_checks():
         'class_role_alignment.py',
         'role_functional_text_definitions.py',
         'role_functional_text_screen.py',
+        'role_visual_field.py',
         'segearthov3_segmentor.py',
+        'tiled_context.py',
         'tools/summarize_role_functional_text_screen.py',
         'tools/summarize_pi_role_compatibility.py',
         'tools/summarize_pe_role_evidence.py',
         'tools/summarize_boundary_replay.py',
         'tools/summarize_class_role_alignment.py',
+        'tools/summarize_role_visual_field.py',
+        'tools/verify_tiled_context.py',
     )
     for relative in sources:
         path = os.path.join(ROOT, relative)
@@ -114,6 +121,14 @@ def static_checks():
             selection['_best_overall_slots'])
         report['datasets'][dataset]['best_all_nonzero_slots'] = list(
             selection['_best_all_nonzero_slots'])
+        visual_registry_path = os.path.join(
+            ROOT, 'configs', 'experiments', 'role_visual_field_v1.json')
+        with open(visual_registry_path, encoding='utf-8') as handle:
+            visual_registry = json.load(handle)
+        assert visual_registry['protocol'] == ROLE_VISUAL_FIELD_PROTOCOL
+        visual = visual_registry['datasets'][dataset]
+        assert int(visual['context_size']) > int(visual['fine_size']) > 0
+        report['datasets'][dataset]['visual_field'] = visual
     assert len(set(VARIANT_NAMES)) == len(VARIANT_NAMES)
     assert len(set(PI_VARIANT_NAMES)) == len(PI_VARIANT_NAMES)
     assert len(set(PI_MECHANISM_MAP_NAMES)) == len(PI_MECHANISM_MAP_NAMES)
@@ -130,6 +145,8 @@ def static_checks():
         0.30, 0.50, 0.70, 0.90)
     assert tuple(value for _, value in CRA_FCRA_TEMPERATURES) == (0.05, 0.10)
     assert len(set(CRA_VARIANT_NAMES)) == len(CRA_VARIANT_NAMES)
+    assert len(ROLE_VISUAL_FIELD_COMPOSITIONS) == 8
+    assert len(set(ROLE_VISUAL_FIELD_VARIANT_NAMES)) == 18
     assert DEFAULT_SETTING == 'alpha050_clip025'
     assert len(RESIDUAL_SETTINGS) == 5
     report['checks'] = [
@@ -150,6 +167,8 @@ def static_checks():
         'class-role alignment reads PE block18 once and preserves fixed admission',
         'CoCo class calibration excludes synonym expansion and double Presence',
         'FCRA compares raw role difference with class-centered role evidence',
+        'visual-field screen has two views and all eight P/S/I assignments',
+        'visual-field FFF is identity-anchored to official/current Role-Text',
         'RemoteCLIP, CLIP APIs, training and online candidate selection are absent',
     ]
     return report

@@ -1,6 +1,7 @@
 """Contracts for the frozen role-functional SAM3 text screen."""
 
 import json
+from itertools import product
 
 
 PROTOCOL = 'role_functional_text_screen_v1'
@@ -18,6 +19,16 @@ BOUNDARY_REPLAY_TRACE_TOLERANCE = 5e-3
 CLASS_ROLE_ALIGNMENT_PROTOCOL = 'class_role_alignment_v1'
 CLASS_ROLE_ALIGNMENT_SCHEMA_VERSION = 1
 CLASS_ROLE_ALIGNMENT_PE_LAYER = 18
+ROLE_VISUAL_FIELD_PROTOCOL = 'role_visual_field_v1'
+ROLE_VISUAL_FIELD_SCHEMA_VERSION = 1
+ROLE_VISUAL_FIELD_COMPOSITIONS = tuple(
+    ''.join(value) for value in product('FC', repeat=3))
+ROLE_VISUAL_FIELD_VARIANT_NAMES = (
+    'rvf_official',
+    'rvf_best_text',
+    *(f'rvf_anchor_{name}' for name in ROLE_VISUAL_FIELD_COMPOSITIONS),
+    *(f'rvf_text_{name}' for name in ROLE_VISUAL_FIELD_COMPOSITIONS),
+)
 
 CRA_COCO_WEIGHTS = (
     ('l030', 0.30),

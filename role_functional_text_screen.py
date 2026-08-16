@@ -95,6 +95,7 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_pe_diagnosis=False,
             role_prompt_tta_boundary_replay_diagnosis=False,
             role_prompt_tta_class_role_alignment=False,
+            role_prompt_tta_visual_field_diagnosis=False,
             role_prompt_tta_selection_registry=None,
             **kwargs):
         self.use_role_prompt_tta = bool(use_role_prompt_tta)
@@ -129,6 +130,8 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_boundary_replay_diagnosis)
         self.role_prompt_tta_class_role_alignment = bool(
             role_prompt_tta_class_role_alignment)
+        self.role_prompt_tta_visual_field_diagnosis = bool(
+            role_prompt_tta_visual_field_diagnosis)
         self.role_prompt_tta_selection_registry = (
             role_prompt_tta_selection_registry)
         self._role_prompt_tta_stats_file = None
@@ -177,10 +180,11 @@ class RoleFunctionalTextScreenMixin:
                 'Completion diagnosis requires prompt-bank completion metadata.')
         if (self.role_prompt_tta_pe_diagnosis
                 or self.role_prompt_tta_boundary_replay_diagnosis
-                or self.role_prompt_tta_class_role_alignment):
+                or self.role_prompt_tta_class_role_alignment
+                or self.role_prompt_tta_visual_field_diagnosis):
             if not role_prompt_tta_selection_registry:
                 raise ValueError(
-                    'PE/boundary/class-role diagnosis requires '
+                    'PE/boundary/class-role/visual-field diagnosis requires '
                     'role_prompt_tta_selection_registry.')
             self._rpt_role_selection = load_role_text_selection_registry(
                 role_prompt_tta_selection_registry,
@@ -203,7 +207,9 @@ class RoleFunctionalTextScreenMixin:
             or getattr(
                 self, 'role_prompt_tta_boundary_replay_diagnosis', False)
             or getattr(
-                self, 'role_prompt_tta_class_role_alignment', False))
+                self, 'role_prompt_tta_class_role_alignment', False)
+            or getattr(
+                self, 'role_prompt_tta_visual_field_diagnosis', False))
 
     @staticmethod
     def _rpt_uses_class_space_variants():
