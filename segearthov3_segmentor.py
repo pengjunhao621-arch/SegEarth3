@@ -62,6 +62,7 @@ class SegEarthOV3Segmentation(
             role_prompt_tta_pe_diagnosis=False,
             role_prompt_tta_boundary_replay_diagnosis=False,
             role_prompt_tta_class_role_alignment=False,
+            role_prompt_tta_fusion_audit=False,
             role_prompt_tta_visual_field_diagnosis=False,
             role_prompt_tta_visual_field_registry=None,
             role_prompt_tta_selection_registry=None,
@@ -140,6 +141,8 @@ class SegEarthOV3Segmentation(
                 role_prompt_tta_boundary_replay_diagnosis),
             role_prompt_tta_class_role_alignment=(
                 role_prompt_tta_class_role_alignment),
+            role_prompt_tta_fusion_audit=(
+                role_prompt_tta_fusion_audit),
             role_prompt_tta_visual_field_diagnosis=(
                 role_prompt_tta_visual_field_diagnosis),
             role_prompt_tta_selection_registry=(
@@ -332,6 +335,24 @@ class SegEarthOV3Segmentation(
             if role_predictions is not None
             and self._rpt_uses_class_role_alignment()
             else None)
+        fusion_audit_predictions = (
+            {
+                name: torch.zeros(
+                    (self.num_cls, image_height, image_width),
+                    dtype=torch.float32, device='cpu')
+                for name in self._rpt_fusion_audit_variant_names()
+            }
+            if role_predictions is not None
+            and self._rpt_uses_fusion_audit()
+            else None)
+        fusion_audit_mechanism_maps = (
+            {
+                name: torch.zeros(
+                    (self.num_cls, image_height, image_width),
+                    dtype=torch.float32, device='cpu')
+                for name in self._rpt_fusion_audit_mechanism_map_names()
+            }
+            if fusion_audit_predictions is not None else None)
 
         height_grids = (
             max(image_height - height_crop + height_stride - 1, 0)
@@ -404,6 +425,17 @@ class SegEarthOV3Segmentation(
                                     'role_prompt_class_role_alignment_logits'
                             ].items():
                                 class_role_alignment_predictions[name][
+                                    :, y1:y2, x1:x2] += value
+                        if fusion_audit_predictions is not None:
+                            for name, value in crop_components[
+                                    'role_prompt_fusion_audit_class_logits'
+                            ].items():
+                                fusion_audit_predictions[name][
+                                    :, y1:y2, x1:x2] += value
+                            for name, value in crop_components[
+                                    'role_prompt_fusion_audit_mechanism_class_maps'
+                            ].items():
+                                fusion_audit_mechanism_maps[name][
                                     :, y1:y2, x1:x2] += value
 
         if torch.any(counts == 0):
@@ -499,6 +531,24 @@ class SegEarthOV3Segmentation(
                     exact_baseline.clone())
                 components['role_prompt_class_role_alignment_logits'] = (
                     class_role_alignment_predictions)
+            if fusion_audit_predictions is not None:
+                fusion_anchor = (
+                    fusion_audit_predictions['ofa_official'] / cpu_counts)
+                for name in fusion_audit_predictions:
+                    fusion_audit_predictions[name] = (
+                        exact_baseline
+                        + fusion_audit_predictions[name] / cpu_counts
+                        - fusion_anchor).clamp(0.0, 1.0)
+                fusion_audit_predictions['ofa_official'] = (
+                    exact_baseline.clone())
+                for name in fusion_audit_mechanism_maps:
+                    fusion_audit_mechanism_maps[name] = (
+                        fusion_audit_mechanism_maps[name] / cpu_counts)
+                components['role_prompt_fusion_audit_class_logits'] = (
+                    fusion_audit_predictions)
+                components[
+                    'role_prompt_fusion_audit_mechanism_class_maps'] = (
+                        fusion_audit_mechanism_maps)
         return predictions, components
 
     def predict(self, inputs, data_samples):
@@ -640,6 +690,18 @@ class SegEarthOV3Segmentation(
                                 mode='bilinear',
                                 align_corners=False,
                             ).squeeze(0)
+                    if ('role_prompt_fusion_audit_class_logits'
+                            in components):
+                        for field in (
+                                'role_prompt_fusion_audit_class_logits',
+                                'role_prompt_fusion_audit_mechanism_class_maps'):
+                            for name, value in components[field].items():
+                                components[field][name] = F.interpolate(
+                                    value.unsqueeze(0),
+                                    size=original_shape,
+                                    mode='bilinear',
+                                    align_corners=False,
+                                ).squeeze(0)
 
             class_logits = self._aggregate_query_logits_to_classes(
                 query_logits)
@@ -665,6 +727,10 @@ class SegEarthOV3Segmentation(
                         'role_prompt_boundary_replay_class_logits'),
                     class_role_alignment_logits=components.get(
                         'role_prompt_class_role_alignment_logits'),
+                    fusion_audit_logits=components.get(
+                        'role_prompt_fusion_audit_class_logits'),
+                    fusion_audit_mechanism_maps=components.get(
+                        'role_prompt_fusion_audit_mechanism_class_maps'),
                 )
             data_sample.set_data({
                 'seg_logits': PixelData(data=class_logits),

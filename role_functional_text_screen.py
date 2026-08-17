@@ -20,6 +20,10 @@ from role_functional_text_definitions import (
     COMPLETION_PROTOCOL,
     COMPLETION_SCHEMA_VERSION,
     DEFAULT_SETTING,
+    FUSION_AUDIT_MECHANISM_MAP_NAMES,
+    FUSION_AUDIT_PROTOCOL,
+    FUSION_AUDIT_SCHEMA_VERSION,
+    FUSION_AUDIT_VARIANT_NAMES,
     PI_MECHANISM_MAP_NAMES,
     PI_PROTOCOL,
     PI_SCHEMA_VERSION,
@@ -95,6 +99,7 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_pe_diagnosis=False,
             role_prompt_tta_boundary_replay_diagnosis=False,
             role_prompt_tta_class_role_alignment=False,
+            role_prompt_tta_fusion_audit=False,
             role_prompt_tta_visual_field_diagnosis=False,
             role_prompt_tta_selection_registry=None,
             **kwargs):
@@ -130,6 +135,8 @@ class RoleFunctionalTextScreenMixin:
             role_prompt_tta_boundary_replay_diagnosis)
         self.role_prompt_tta_class_role_alignment = bool(
             role_prompt_tta_class_role_alignment)
+        self.role_prompt_tta_fusion_audit = bool(
+            role_prompt_tta_fusion_audit)
         self.role_prompt_tta_visual_field_diagnosis = bool(
             role_prompt_tta_visual_field_diagnosis)
         self.role_prompt_tta_selection_registry = (
@@ -181,10 +188,11 @@ class RoleFunctionalTextScreenMixin:
         if (self.role_prompt_tta_pe_diagnosis
                 or self.role_prompt_tta_boundary_replay_diagnosis
                 or self.role_prompt_tta_class_role_alignment
+                or self.role_prompt_tta_fusion_audit
                 or self.role_prompt_tta_visual_field_diagnosis):
             if not role_prompt_tta_selection_registry:
                 raise ValueError(
-                    'PE/boundary/class-role/visual-field diagnosis requires '
+                    'PE/boundary/class-role/fusion/visual-field diagnosis requires '
                     'role_prompt_tta_selection_registry.')
             self._rpt_role_selection = load_role_text_selection_registry(
                 role_prompt_tta_selection_registry,
@@ -208,6 +216,7 @@ class RoleFunctionalTextScreenMixin:
                 self, 'role_prompt_tta_boundary_replay_diagnosis', False)
             or getattr(
                 self, 'role_prompt_tta_class_role_alignment', False)
+            or getattr(self, 'role_prompt_tta_fusion_audit', False)
             or getattr(
                 self, 'role_prompt_tta_visual_field_diagnosis', False))
 
@@ -232,6 +241,17 @@ class RoleFunctionalTextScreenMixin:
     def _rpt_uses_class_role_alignment(self):
         return bool(getattr(
             self, 'role_prompt_tta_class_role_alignment', False))
+
+    def _rpt_uses_fusion_audit(self):
+        return bool(getattr(self, 'role_prompt_tta_fusion_audit', False))
+
+    @staticmethod
+    def _rpt_fusion_audit_variant_names():
+        return FUSION_AUDIT_VARIANT_NAMES
+
+    @staticmethod
+    def _rpt_fusion_audit_mechanism_map_names():
+        return FUSION_AUDIT_MECHANISM_MAP_NAMES
 
     @staticmethod
     def _rpt_pe_variant_names():
@@ -700,6 +720,100 @@ class RoleFunctionalTextScreenMixin:
             final = final * float(torch.as_tensor(presence).float().item())
         return final
 
+    def _rft_fusion_operator(self, name, semantic, instance, presence):
+        """Read one P/S/I state without changing the state itself."""
+        semantic = torch.as_tensor(semantic).float()
+        instance = torch.as_tensor(instance).float()
+        presence = torch.as_tensor(presence).float().reshape(())
+        if not self.use_sem_seg:
+            semantic = torch.zeros_like(instance)
+
+        def outer(value):
+            value = value.clamp(0.0, 1.0)
+            return value * presence if self.use_presence_score else value
+
+        if name == 'ofa_native':
+            return outer(torch.maximum(semantic, instance))
+        if name == 'ofa_semantic_only':
+            return outer(semantic)
+        if name == 'ofa_instance_only':
+            return outer(instance)
+        if name.startswith('ofa_takeover_i'):
+            weight = float(name.rsplit('i', 1)[1]) / 100.0
+            return outer(semantic + weight * F.relu(instance - semantic))
+        if name.startswith('ofa_smoothmax_t'):
+            temperature = float(name.rsplit('t', 1)[1]) / 100.0
+            stacked = torch.stack((semantic, instance), dim=0)
+            weights = torch.softmax(stacked / temperature, dim=0)
+            return outer((weights * stacked).sum(dim=0))
+        if name == 'ofa_soft_or':
+            return outer(semantic + instance - semantic * instance)
+        if name.startswith('ofa_instance_scale'):
+            scale = float(name.rsplit('scale', 1)[1]) / 100.0
+            return outer(torch.maximum(
+                semantic, (scale * instance).clamp(0.0, 1.0)))
+        if name == 'ofa_branch_once':
+            if not self.use_presence_score:
+                return torch.maximum(semantic, instance)
+            # ``instance`` already contains Presence through query amplitude.
+            return torch.maximum(presence * semantic, instance).clamp(0.0, 1.0)
+        if name == 'ofa_no_outer_presence':
+            return torch.maximum(semantic, instance).clamp(0.0, 1.0)
+        raise KeyError(f'Unknown fusion-audit operator: {name}.')
+
+    def _rft_build_fusion_audit(
+            self, official, anchor_semantic, anchor_instance,
+            anchor_presence, selected_semantic, selected_instance,
+            selected_presence):
+        """Apply matched operators to anchor and selected Role-Text states.
+
+        Every row is ``official + G(selected) - G(anchor)``.  It therefore
+        tests how an operator reads the Role-Text increment, without silently
+        replacing the official no-update baseline with another fusion rule.
+        """
+        values = OrderedDict(ofa_official=official.float().clone())
+        for name in FUSION_AUDIT_VARIANT_NAMES[1:]:
+            if name.startswith('ofa_recompose_'):
+                anchor_evidence = torch.maximum(
+                    anchor_semantic.float(), anchor_instance.float())
+                semantic_delta = (
+                    selected_semantic.float() - anchor_semantic.float())
+                instance_delta = (
+                    selected_instance.float() - anchor_instance.float())
+                if name == 'ofa_recompose_instance_supported':
+                    support = torch.maximum(
+                        anchor_instance.float(), selected_instance.float()
+                    ).clamp(0.0, 1.0)
+                    instance_delta = support * instance_delta
+                selected_evidence = (
+                    anchor_evidence + semantic_delta + instance_delta
+                ).clamp(0.0, 1.0)
+                selected_value = selected_evidence
+                anchor_value = anchor_evidence
+                if self.use_presence_score:
+                    selected_value = selected_value * selected_presence
+                    anchor_value = anchor_value * anchor_presence
+            else:
+                selected_value = self._rft_fusion_operator(
+                    name, selected_semantic, selected_instance,
+                    selected_presence)
+                anchor_value = self._rft_fusion_operator(
+                    name, anchor_semantic, anchor_instance, anchor_presence)
+            values[name] = (
+                official.float() + selected_value.float()
+                - anchor_value.float()).clamp(0.0, 1.0)
+
+        reference = torch.ones_like(anchor_semantic, dtype=torch.float32)
+        maps = OrderedDict(
+            anchor_semantic=anchor_semantic.float(),
+            anchor_instance=anchor_instance.float(),
+            anchor_presence=reference * anchor_presence.float(),
+            selected_semantic=selected_semantic.float(),
+            selected_instance=selected_instance.float(),
+            selected_presence=reference * selected_presence.float(),
+        )
+        return values, maps
+
     def _rft_pi_compatibility_replays(
             self, anchor, presence_package, instance_package, output_shape,
             alpha, clip):
@@ -937,6 +1051,20 @@ class RoleFunctionalTextScreenMixin:
         class_role_alignment_inputs = []
         class_role_alignment_expected = []
         class_role_alignment_diagnosis = None
+        fusion_audit_variants = None
+        fusion_audit_mechanism_maps = None
+        fusion_audit_selection_errors = []
+        if self._rpt_uses_fusion_audit():
+            fusion_audit_variants = OrderedDict(
+                (name, torch.empty(
+                    (self.num_cls, height, width), dtype=torch.float32,
+                    device='cpu'))
+                for name in FUSION_AUDIT_VARIANT_NAMES)
+            fusion_audit_mechanism_maps = OrderedDict(
+                (name, torch.empty(
+                    (self.num_cls, height, width), dtype=torch.float32,
+                    device='cpu'))
+                for name in FUSION_AUDIT_MECHANISM_MAP_NAMES)
         settings = {
             name: (float(alpha), float(clip))
             for name, alpha, clip in RESIDUAL_SETTINGS
@@ -1142,9 +1270,9 @@ class RoleFunctionalTextScreenMixin:
                     **pi_query_row,
                 ))
 
-            def compose(presence_slot=0, semantic_slot=0, instance_slot=0,
-                        setting=DEFAULT_SETTING, shared_package=None,
-                        anchor_admission=False):
+            def role_state(presence_slot=0, semantic_slot=0, instance_slot=0,
+                           setting=DEFAULT_SETTING, shared_package=None,
+                           anchor_admission=False):
                 alpha, clip = settings[setting]
                 presence_package = shared_package or (
                     role_packages['presence'][presence_slot]
@@ -1175,12 +1303,48 @@ class RoleFunctionalTextScreenMixin:
                         instance_package, presence, admission_presence)
                     instance, _ = self._rft_bounded(
                         base_instance, candidate_instance, alpha, clip)
+                return presence, semantic, instance
+
+            def compose(presence_slot=0, semantic_slot=0, instance_slot=0,
+                        setting=DEFAULT_SETTING, shared_package=None,
+                        anchor_admission=False):
+                presence, semantic, instance = role_state(
+                    presence_slot, semantic_slot, instance_slot,
+                    setting, shared_package, anchor_admission)
                 role_final = self._rft_role_final(
                     semantic, instance, presence, output_shape)
                 return (
                     official_final.float()
                     + role_final.float() - role_anchor_final.float()
                 ).clamp(0.0, 1.0)
+
+            if fusion_audit_variants is not None:
+                selected_slots = self._rpt_role_selection[
+                    '_best_overall_slots']
+                selected_admission = self._rpt_role_selection[
+                    'best_overall']['admission']
+                selected_presence, selected_semantic, selected_instance = (
+                    role_state(
+                        *selected_slots,
+                        anchor_admission=(
+                            selected_admission == 'anchor_admission')))
+                class_audit, class_maps = self._rft_build_fusion_audit(
+                    official_final, anchor_semantic, anchor_instance,
+                    anchor_presence, selected_semantic, selected_instance,
+                    selected_presence)
+                expected_selected = compose(
+                    *selected_slots,
+                    anchor_admission=(
+                        selected_admission == 'anchor_admission'))
+                fusion_audit_selection_errors.append(max(
+                    float((class_audit['ofa_official'] - official_final
+                           ).abs().max().item()),
+                    float((class_audit['ofa_native'] - expected_selected
+                           ).abs().max().item())))
+                for name, value in class_audit.items():
+                    fusion_audit_variants[name][class_index].copy_(value)
+                for name, value in class_maps.items():
+                    fusion_audit_mechanism_maps[name][class_index].copy_(value)
 
             if boundary_replay_variants is not None:
                 with torch.no_grad(), self._rpt_autocast_context():
@@ -1325,6 +1489,9 @@ class RoleFunctionalTextScreenMixin:
                 float((class_role_alignment_variants['cra_best_full']
                        - expected_selected).abs().max().item()))
 
+        fusion_audit_selection_error = max(
+            fusion_audit_selection_errors or [0.0])
+
         identity_error = float((
             variants['combo_p0_s0_i0'] - variants['baseline']
         ).abs().max().item())
@@ -1372,11 +1539,20 @@ class RoleFunctionalTextScreenMixin:
                 and tuple(class_role_alignment_variants)
                 != CRA_VARIANT_NAMES):
             raise RuntimeError('Class-role alignment variant order drifted.')
+        if (fusion_audit_variants is not None
+                and tuple(fusion_audit_variants)
+                != FUSION_AUDIT_VARIANT_NAMES):
+            raise RuntimeError('Fusion-audit variant order drifted.')
+        if (fusion_audit_mechanism_maps is not None
+                and tuple(fusion_audit_mechanism_maps)
+                != FUSION_AUDIT_MECHANISM_MAP_NAMES):
+            raise RuntimeError('Fusion-audit mechanism maps drifted.')
         if (self.role_prompt_tta_strict_integrity
                 and max(identity_error, recomposition_error,
                         pi_identity_error, pi_replay_match_error,
                         completion_noop_error, boundary_selection_error,
-                        class_role_alignment_selection_error)
+                        class_role_alignment_selection_error,
+                        fusion_audit_selection_error)
                 > self.role_prompt_tta_integrity_tolerance):
             raise RuntimeError(
                 'Role-functional integrity failed: '
@@ -1386,6 +1562,7 @@ class RoleFunctionalTextScreenMixin:
                 f'completion_noop={completion_noop_error}, '
                 f'boundary_selection={boundary_selection_error}, '
                 f'class_role_selection={class_role_alignment_selection_error}, '
+                f'fusion_audit_selection={fusion_audit_selection_error}, '
                 f'native_recomposition={recomposition_error}.')
 
         view_stats = dict(
@@ -1406,13 +1583,15 @@ class RoleFunctionalTextScreenMixin:
             boundary_selection_max_abs=boundary_selection_error,
             class_role_alignment_selection_max_abs=(
                 class_role_alignment_selection_error),
+            fusion_audit_selection_max_abs=fusion_audit_selection_error,
             official_query_count=int(self.num_queries),
             canonical_class_count=int(self.num_cls),
             diagnostic_variant_count=(
                 len(variants) + len(completion_variants or {})
                 + len(pe_variants or {})
                 + len(boundary_replay_variants or {})
-                + len(class_role_alignment_variants or {})),
+                + len(class_role_alignment_variants or {})
+                + len(fusion_audit_variants or {})),
             diagnostic_cpu_bytes=int(sum(
                 value.numel() * value.element_size()
                 for value in variants.values()) + sum(
@@ -1423,7 +1602,12 @@ class RoleFunctionalTextScreenMixin:
                 value.numel() * value.element_size()
                 for value in (boundary_replay_variants or {}).values()) + sum(
                 value.numel() * value.element_size()
-                for value in (class_role_alignment_variants or {}).values())),
+                for value in (class_role_alignment_variants or {}).values()) + sum(
+                value.numel() * value.element_size()
+                for value in (fusion_audit_variants or {}).values()) + sum(
+                value.numel() * value.element_size()
+                for value in (
+                    fusion_audit_mechanism_maps or {}).values())),
             default_residual_setting=DEFAULT_SETTING,
             residual_settings=[
                 dict(name=name, alpha=alpha, clip=clip)
@@ -1495,6 +1679,19 @@ class RoleFunctionalTextScreenMixin:
                     variants=list(CRA_VARIANT_NAMES),
                     **class_role_alignment_diagnosis,
                 ) if class_role_alignment_variants is not None else None),
+            fusion_audit_diagnosis=(
+                dict(
+                    schema_version=FUSION_AUDIT_SCHEMA_VERSION,
+                    protocol=FUSION_AUDIT_PROTOCOL,
+                    selected_combination=list(
+                        self._rpt_role_selection['_best_overall_slots']),
+                    selected_admission=self._rpt_role_selection[
+                        'best_overall']['admission'],
+                    variants=list(FUSION_AUDIT_VARIANT_NAMES),
+                    composition=(
+                        'official + G(selected_role_state) '
+                        '- G(anchor_role_state)'),
+                ) if fusion_audit_variants is not None else None),
             cuda_memory=dict(main=_cuda_memory_snapshot(self.device)),
         )
         primary = baseline_query['final'].to(self.device)
@@ -1519,6 +1716,11 @@ class RoleFunctionalTextScreenMixin:
         if class_role_alignment_variants is not None:
             components['role_prompt_class_role_alignment_logits'] = (
                 class_role_alignment_variants)
+        if fusion_audit_variants is not None:
+            components['role_prompt_fusion_audit_class_logits'] = (
+                fusion_audit_variants)
+            components['role_prompt_fusion_audit_mechanism_class_maps'] = (
+                fusion_audit_mechanism_maps)
         stats = dict(
             view_id=view_id,
             crop_box=crop_box,
@@ -1988,6 +2190,194 @@ class RoleFunctionalTextScreenMixin:
             ),
         )
 
+    def _rft_fusion_audit_record(
+            self, variant_logits, mechanism_maps, gt, valid):
+        if variant_logits is None or mechanism_maps is None:
+            return None
+        if tuple(variant_logits) != FUSION_AUDIT_VARIANT_NAMES:
+            raise RuntimeError('Recorded fusion-audit variants drifted.')
+        if tuple(mechanism_maps) != FUSION_AUDIT_MECHANISM_MAP_NAMES:
+            raise RuntimeError('Recorded fusion-audit maps drifted.')
+
+        logits = OrderedDict(
+            (name, value.detach().float().cpu())
+            for name, value in variant_logits.items())
+        predictions = OrderedDict(
+            (name, self._rpt_threshold(value).to(torch.int16))
+            for name, value in logits.items())
+        official = predictions['ofa_official']
+        native = predictions['ofa_native']
+        rows = OrderedDict()
+        for name in FUSION_AUDIT_VARIANT_NAMES:
+            reference_name = (
+                'ofa_official' if name in ('ofa_official', 'ofa_native')
+                else 'ofa_native')
+            reference = predictions[reference_name]
+            prediction = predictions[name]
+            changed = valid & (prediction != reference)
+            improved = changed & (prediction == gt) & (reference != gt)
+            harmed = changed & (prediction != gt) & (reference == gt)
+            wrong_to_wrong = changed & (prediction != gt) & (reference != gt)
+            reference_fg = reference != self.bg_idx
+            prediction_fg = prediction != self.bg_idx
+            rows[name] = dict(
+                reference_variant=reference_name,
+                confusion=self._rpt_confusion(prediction, gt, valid),
+                changed_pixels=int(changed.sum().item()),
+                improved_pixels=int(improved.sum().item()),
+                harmed_pixels=int(harmed.sum().item()),
+                wrong_to_wrong_pixels=int(wrong_to_wrong.sum().item()),
+                help_minus_harm=(int(improved.sum().item())
+                                 - int(harmed.sum().item())),
+                background_to_foreground_pixels=int((
+                    changed & ~reference_fg & prediction_fg).sum().item()),
+                foreground_to_background_pixels=int((
+                    changed & reference_fg & ~prediction_fg).sum().item()),
+                foreground_to_foreground_pixels=int((
+                    changed & reference_fg & prediction_fg).sum().item()),
+            )
+
+        maps = {
+            name: value.detach().float().cpu()
+            for name, value in mechanism_maps.items()
+        }
+        anchor_s = maps['anchor_semantic']
+        anchor_i = maps['anchor_instance']
+        anchor_p = maps['anchor_presence']
+        selected_s = maps['selected_semantic']
+        selected_i = maps['selected_instance']
+        selected_p = maps['selected_presence']
+        delta_s = selected_s - anchor_s
+        delta_i = selected_i - anchor_i
+        delta_p = selected_p - anchor_p
+        valid3 = valid.unsqueeze(0).expand_as(selected_s)
+        safe_gt = gt.clamp(0, int(self.num_cls) - 1)
+        target = F.one_hot(
+            safe_gt, num_classes=int(self.num_cls)
+        ).permute(2, 0, 1).bool() & valid3
+        non_target = valid3 & ~target
+        eps = 1e-6
+
+        def directional(delta):
+            active = valid3 & (delta.abs() > eps)
+            helpful = ((target & (delta > eps))
+                       | (non_target & (delta < -eps)))
+            harmful = ((target & (delta < -eps))
+                       | (non_target & (delta > eps)))
+            return active, helpful, harmful
+
+        active_s, helpful_s, harmful_s = directional(delta_s)
+        active_i, helpful_i, harmful_i = directional(delta_i)
+        active_p, helpful_p, harmful_p = directional(delta_p)
+        anchor_i_wins = anchor_i > anchor_s
+        selected_i_wins = selected_i > selected_s
+        s_to_i = valid3 & ~anchor_i_wins & selected_i_wins
+        i_to_s = valid3 & anchor_i_wins & ~selected_i_wins
+
+        def count(mask):
+            return int(mask.sum().item())
+
+        def component_row(active, helpful, harmful, winner, losing):
+            return dict(
+                active_entries=count(active),
+                helpful_entries=count(helpful),
+                harmful_entries=count(harmful),
+                helpful_winning_entries=count(helpful & winner),
+                helpful_losing_entries=count(helpful & losing),
+                harmful_winning_entries=count(harmful & winner),
+                harmful_losing_entries=count(harmful & losing),
+            )
+
+        component_rows = dict(
+            semantic=component_row(
+                active_s, helpful_s, harmful_s,
+                valid3 & ~selected_i_wins, valid3 & selected_i_wins),
+            instance=component_row(
+                active_i, helpful_i, harmful_i,
+                valid3 & selected_i_wins, valid3 & ~selected_i_wins),
+            presence=dict(
+                active_entries=count(active_p),
+                helpful_entries=count(helpful_p),
+                harmful_entries=count(harmful_p),
+            ),
+        )
+
+        top_class = logits['ofa_native'].argmax(dim=0)
+        top_score = logits['ofa_native'].max(dim=0)[0]
+        gather_index = top_class.unsqueeze(0)
+        top_margin = (
+            selected_i.gather(0, gather_index).squeeze(0)
+            - selected_s.gather(0, gather_index).squeeze(0))
+        native_correct = native == gt
+        official_correct = official == gt
+        margin_bins = []
+        bins = (
+            ('lt_m025', None, -0.25),
+            ('m025_m010', -0.25, -0.10),
+            ('m010_000', -0.10, 0.0),
+            ('000_p010', 0.0, 0.10),
+            ('p010_p025', 0.10, 0.25),
+            ('ge_p025', 0.25, None),
+        )
+        for label, lower, upper in bins:
+            mask = valid.clone()
+            if lower is not None:
+                mask &= top_margin >= lower
+            if upper is not None:
+                mask &= top_margin < upper
+            margin_bins.append(dict(
+                bin=label,
+                pixels=count(mask),
+                correct_pixels=count(mask & native_correct),
+                corrected_vs_official=count(
+                    mask & native_correct & ~official_correct),
+                harmed_vs_official=count(
+                    mask & ~native_correct & official_correct),
+                threshold_rejected_pixels=count(mask & (top_score < self.prob_thd)),
+            ))
+
+        class_rows = []
+        for class_index, class_name in enumerate(self.class_names):
+            class_valid = valid3[class_index]
+            class_rows.append(dict(
+                class_index=int(class_index),
+                class_name=class_name,
+                gt_pixels=count(target[class_index]),
+                selected_instance_winner_entries=count(
+                    class_valid & selected_i_wins[class_index]),
+                s_to_i_entries=count(s_to_i[class_index]),
+                i_to_s_entries=count(i_to_s[class_index]),
+                semantic_helpful_losing_entries=count(
+                    helpful_s[class_index] & selected_i_wins[class_index]),
+                semantic_harmful_winning_entries=count(
+                    harmful_s[class_index] & ~selected_i_wins[class_index]),
+                instance_helpful_losing_entries=count(
+                    helpful_i[class_index] & ~selected_i_wins[class_index]),
+                instance_harmful_winning_entries=count(
+                    harmful_i[class_index] & selected_i_wins[class_index]),
+            ))
+
+        return dict(
+            schema_version=FUSION_AUDIT_SCHEMA_VERSION,
+            protocol=FUSION_AUDIT_PROTOCOL,
+            selected_combination=list(
+                self._rpt_role_selection['_best_overall_slots']),
+            selected_admission=self._rpt_role_selection[
+                'best_overall']['admission'],
+            variants=rows,
+            mechanism=dict(
+                class_entries=count(valid3),
+                selected_instance_winner_entries=count(
+                    valid3 & selected_i_wins),
+                anchor_instance_winner_entries=count(valid3 & anchor_i_wins),
+                s_to_i_entries=count(s_to_i),
+                i_to_s_entries=count(i_to_s),
+                components=component_rows,
+                margin_bins=margin_bins,
+                class_rows=class_rows,
+            ),
+        )
+
     def _rft_completion_record(
             self, completion_variant_logits, variant_logits, gt, valid):
         if completion_variant_logits is None:
@@ -2037,7 +2427,9 @@ class RoleFunctionalTextScreenMixin:
             pi_variant_logits=None, pi_mechanism_maps=None,
             completion_variant_logits=None, pe_variant_logits=None,
             boundary_replay_variant_logits=None,
-            class_role_alignment_logits=None):
+            class_role_alignment_logits=None,
+            fusion_audit_logits=None,
+            fusion_audit_mechanism_maps=None):
         if not self.dump_role_prompt_tta_stats:
             return
         if data_sample is None or not hasattr(data_sample, 'gt_sem_seg'):
@@ -2109,9 +2501,14 @@ class RoleFunctionalTextScreenMixin:
                 boundary_replay_variant_logits, gt, valid),
             class_role_alignment=self._cra_record(
                 class_role_alignment_logits, gt, valid),
+            overall_best_fusion_audit=self._rft_fusion_audit_record(
+                fusion_audit_logits, fusion_audit_mechanism_maps, gt, valid),
         )
         self._rpt_write_stats(record)
-        self._rpt_save_artifact(image_path, predictions, gt, valid)
+        self._rpt_save_artifact(
+            image_path, predictions, gt, valid,
+            fusion_audit_logits=fusion_audit_logits,
+            fusion_audit_mechanism_maps=fusion_audit_mechanism_maps)
 
     def _rpt_write_stats(self, record):
         if self._role_prompt_tta_stats_file is None:
@@ -2124,7 +2521,9 @@ class RoleFunctionalTextScreenMixin:
         self._role_prompt_tta_stats_file.write(
             json.dumps(record, ensure_ascii=False) + '\n')
 
-    def _rpt_save_artifact(self, image_path, predictions, gt, valid):
+    def _rpt_save_artifact(
+            self, image_path, predictions, gt, valid,
+            fusion_audit_logits=None, fusion_audit_mechanism_maps=None):
         if (not self.role_prompt_tta_save_npz
                 or self._role_prompt_tta_saved_images
                 >= self.role_prompt_tta_max_saved_images):
@@ -2147,12 +2546,26 @@ class RoleFunctionalTextScreenMixin:
                 value.float()[None, None], size=target,
                 mode='nearest').squeeze().long().cpu().numpy()
 
+        def resize_score(value):
+            return F.interpolate(
+                value.float().unsqueeze(0), size=target,
+                mode='bilinear', align_corners=False
+            ).squeeze(0).cpu().numpy().astype(np.float16)
+
         arrays = {
             'gt': resize_label(gt),
             'valid': resize_label(valid.long()).astype(np.uint8),
         }
         for name, prediction in predictions.items():
             arrays[f'pred_{name}'] = resize_label(prediction)
+        if fusion_audit_logits is not None:
+            for name, value in fusion_audit_logits.items():
+                arrays[f'pred_{name}'] = resize_label(
+                    self._rpt_threshold(value.detach().float().cpu()))
+        if fusion_audit_mechanism_maps is not None:
+            for name, value in fusion_audit_mechanism_maps.items():
+                arrays[f'map_{name}'] = resize_score(
+                    value.detach().float().cpu())
         stem = os.path.splitext(os.path.basename(image_path or 'image'))[0]
         np.savez_compressed(
             os.path.join(

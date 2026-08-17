@@ -30,6 +30,37 @@ ROLE_VISUAL_FIELD_VARIANT_NAMES = (
     *(f'rvf_text_{name}' for name in ROLE_VISUAL_FIELD_COMPOSITIONS),
 )
 
+FUSION_AUDIT_PROTOCOL = 'overall_best_fusion_audit_v1'
+FUSION_AUDIT_SCHEMA_VERSION = 1
+FUSION_AUDIT_VARIANT_SPECS = (
+    ('ofa_official', 'reference'),
+    ('ofa_native', 'reference'),
+    ('ofa_semantic_only', 'ablation'),
+    ('ofa_instance_only', 'ablation'),
+    ('ofa_takeover_i025', 'candidate'),
+    ('ofa_takeover_i050', 'candidate'),
+    ('ofa_takeover_i075', 'candidate'),
+    ('ofa_smoothmax_t005', 'candidate'),
+    ('ofa_smoothmax_t010', 'candidate'),
+    ('ofa_soft_or', 'candidate'),
+    ('ofa_instance_scale075', 'candidate'),
+    ('ofa_instance_scale125', 'candidate'),
+    ('ofa_branch_once', 'candidate'),
+    ('ofa_no_outer_presence', 'candidate'),
+    ('ofa_recompose_dense', 'candidate'),
+    ('ofa_recompose_instance_supported', 'candidate'),
+)
+FUSION_AUDIT_VARIANT_NAMES = tuple(
+    name for name, _ in FUSION_AUDIT_VARIANT_SPECS)
+FUSION_AUDIT_MECHANISM_MAP_NAMES = (
+    'anchor_semantic',
+    'anchor_instance',
+    'anchor_presence',
+    'selected_semantic',
+    'selected_instance',
+    'selected_presence',
+)
+
 CRA_COCO_WEIGHTS = (
     ('l030', 0.30),
     ('l050', 0.50),

@@ -2,7 +2,9 @@
 set -euo pipefail
 
 MODE="${1:-smoke}"
-if [[ "${MODE}" == class-role-alignment-* ]]; then
+if [[ "${MODE}" == fusion-audit-* ]]; then
+    ROOT="${ROOT:-logs/overall_best_fusion_audit_v1}"
+elif [[ "${MODE}" == class-role-alignment-* ]]; then
     ROOT="${ROOT:-logs/class_role_alignment_v1}"
 elif [[ "${MODE}" == boundary-replay-* ]]; then
     ROOT="${ROOT:-logs/boundary_replay_v1}"
@@ -100,6 +102,8 @@ collect() {
             echo "[boundary-replay-v1] ${dataset} -> ${out_dir}"
         elif [[ "${experiment_mode}" == "class-role-alignment" ]]; then
             echo "[class-role-alignment-v1] ${dataset} -> ${out_dir}"
+        elif [[ "${experiment_mode}" == "fusion-audit" ]]; then
+            echo "[overall-best-fusion-audit-v1] ${dataset} -> ${out_dir}"
         elif [[ "${experiment_mode}" == "pi" ]]; then
             echo "[pi-role-compatibility-v1] ${dataset} -> ${out_dir}"
         elif [[ "${experiment_mode}" == "completion" ]]; then
@@ -111,7 +115,6 @@ collect() {
             model.role_prompt_tta_stats_path="${out_dir}/screen.jsonl"
             model.role_prompt_tta_primary_variant=baseline
             model.role_prompt_tta_integrity_tolerance="${INTEGRITY_TOLERANCE}"
-            model.role_prompt_tta_save_npz=False
         )
         if [[ "${experiment_mode}" == "pe" ]]; then
             common_options+=(
@@ -131,6 +134,16 @@ collect() {
                 model.role_prompt_tta_class_role_alignment=True
                 model.role_prompt_tta_selection_registry="configs/experiments/role_text_selections_v1.json"
             )
+        elif [[ "${experiment_mode}" == "fusion-audit" ]]; then
+            common_options+=(
+                model.role_prompt_tta_prompt_bank="configs/prompt_banks/role_functional_text_v2/${dataset}.json"
+                model.role_prompt_tta_fusion_audit=True
+                model.role_prompt_tta_selection_registry="configs/experiments/role_text_selections_v1.json"
+                model.role_prompt_tta_save_npz=True
+                model.role_prompt_tta_artifact_dir="${out_dir}/artifacts"
+                model.role_prompt_tta_artifact_max_side=128
+                model.role_prompt_tta_max_saved_images=4
+            )
         elif [[ "${experiment_mode}" == "pi" ]]; then
             read -r presence_slot instance_slot <<< "$(pi_slots_for "${dataset}")"
             common_options+=(
@@ -143,6 +156,8 @@ collect() {
                 model.role_prompt_tta_prompt_bank="configs/prompt_banks/role_functional_text_v2/${dataset}.json"
                 model.role_prompt_tta_completion_diagnosis=True
             )
+        else
+            common_options+=(model.role_prompt_tta_save_npz=False)
         fi
         if [[ "${collection_mode}" == "smoke" ]]; then
             run_eval "${config}" "${out_dir}" \
@@ -178,6 +193,8 @@ summarize() {
         summarizer="tools/summarize_boundary_replay.py"
     elif [[ "${experiment_mode}" == "class-role-alignment" ]]; then
         summarizer="tools/summarize_class_role_alignment.py"
+    elif [[ "${experiment_mode}" == "fusion-audit" ]]; then
+        summarizer="tools/summarize_overall_best_fusion_audit.py"
     elif [[ "${experiment_mode}" == "pi" ]]; then
         summarizer="tools/summarize_pi_role_compatibility.py"
     fi
@@ -279,8 +296,22 @@ case "${MODE}" in
         collect full class-role-alignment
         summarize class-role-alignment
         ;;
+    fusion-audit-smoke)
+        collect smoke fusion-audit
+        summarize fusion-audit
+        ;;
+    fusion-audit-collect-all)
+        collect full fusion-audit
+        ;;
+    fusion-audit-summarize)
+        summarize fusion-audit
+        ;;
+    fusion-audit-all)
+        collect full fusion-audit
+        summarize fusion-audit
+        ;;
     *)
-        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all|completion-smoke|completion-collect-all|completion-summarize|completion-all|pe-smoke|pe-collect-all|pe-summarize|pe-all|boundary-replay-smoke|boundary-replay-collect-all|boundary-replay-summarize|boundary-replay-all|class-role-alignment-smoke|class-role-alignment-collect-all|class-role-alignment-summarize|class-role-alignment-all}" >&2
+        echo "Usage: bash $0 {preflight|smoke|collect-all|summarize|all|pi-smoke|pi-collect-all|pi-summarize|pi-all|completion-smoke|completion-collect-all|completion-summarize|completion-all|pe-smoke|pe-collect-all|pe-summarize|pe-all|boundary-replay-smoke|boundary-replay-collect-all|boundary-replay-summarize|boundary-replay-all|class-role-alignment-smoke|class-role-alignment-collect-all|class-role-alignment-summarize|class-role-alignment-all|fusion-audit-smoke|fusion-audit-collect-all|fusion-audit-summarize|fusion-audit-all}" >&2
         exit 2
         ;;
 esac

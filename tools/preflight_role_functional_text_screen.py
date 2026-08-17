@@ -22,6 +22,8 @@ from role_functional_text_definitions import (
     CRA_VARIANT_NAMES,
     COMPLETION_PROTOCOL,
     DEFAULT_SETTING,
+    FUSION_AUDIT_MECHANISM_MAP_NAMES,
+    FUSION_AUDIT_VARIANT_NAMES,
     PI_MECHANISM_MAP_NAMES,
     PI_VARIANT_NAMES,
     PE_LAYER_IDS,
@@ -65,6 +67,7 @@ def static_checks():
         'tools/summarize_pe_role_evidence.py',
         'tools/summarize_boundary_replay.py',
         'tools/summarize_class_role_alignment.py',
+        'tools/summarize_overall_best_fusion_audit.py',
         'tools/summarize_role_visual_field.py',
         'tools/verify_tiled_context.py',
     )
@@ -145,6 +148,11 @@ def static_checks():
         0.30, 0.50, 0.70, 0.90)
     assert tuple(value for _, value in CRA_FCRA_TEMPERATURES) == (0.05, 0.10)
     assert len(set(CRA_VARIANT_NAMES)) == len(CRA_VARIANT_NAMES)
+    assert len(set(FUSION_AUDIT_VARIANT_NAMES)) == len(
+        FUSION_AUDIT_VARIANT_NAMES)
+    assert FUSION_AUDIT_VARIANT_NAMES[:2] == (
+        'ofa_official', 'ofa_native')
+    assert len(set(FUSION_AUDIT_MECHANISM_MAP_NAMES)) == 6
     assert len(ROLE_VISUAL_FIELD_COMPOSITIONS) == 8
     assert len(set(ROLE_VISUAL_FIELD_VARIANT_NAMES)) == 18
     assert DEFAULT_SETTING == 'alpha050_clip025'
@@ -167,6 +175,8 @@ def static_checks():
         'class-role alignment reads PE block18 once and preserves fixed admission',
         'CoCo class calibration excludes synonym expansion and double Presence',
         'FCRA compares raw role difference with class-centered role evidence',
+        'fusion audit compares matched operators around the exact official baseline',
+        'fusion audit records losing residuals, head takeover and class transitions',
         'visual-field screen has two views and all eight P/S/I assignments',
         'visual-field FFF is identity-anchored to official/current Role-Text',
         'RemoteCLIP, CLIP APIs, training and online candidate selection are absent',
