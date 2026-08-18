@@ -196,6 +196,7 @@ def runtime_checks(report):
     torch = importlib.import_module('torch')
     mmengine = importlib.import_module('mmengine')
     from mmengine.config import Config
+    from role_visual_field import RoleVisualFieldMixin
     checkpoint = os.path.join(ROOT, 'weights', 'sam3', 'sam3.pt')
     if not os.path.isfile(checkpoint):
         raise FileNotFoundError(checkpoint)
@@ -203,11 +204,19 @@ def runtime_checks(report):
         Config.fromfile(os.path.join(
             ROOT, 'configs', 'experiments',
             f'cfg_{dataset}_role_functional_text_screen.py'))
+    roi = (19, 23, 531, 535)
+    if RoleVisualFieldMixin._rvf_crop(
+            torch.zeros((1000, 1000)), roi).shape != (512, 512):
+        raise RuntimeError('2D visual-field crop shape is incorrect.')
+    if RoleVisualFieldMixin._rvf_crop(
+            torch.zeros((7, 1000, 1000)), roi).shape != (7, 512, 512):
+        raise RuntimeError('3D visual-field crop shape is incorrect.')
     report['runtime'] = dict(
         torch=torch.__version__,
         mmengine=mmengine.__version__,
         sam3_checkpoint_bytes=os.path.getsize(checkpoint),
         all_mmengine_configs='parsed',
+        spatial_crop_shapes='2D and 3D passed',
     )
 
 

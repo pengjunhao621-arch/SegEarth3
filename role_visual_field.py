@@ -256,7 +256,7 @@ class RoleVisualFieldMixin:
     @staticmethod
     def _rvf_crop(value, roi):
         x1, y1, x2, y2 = roi
-        return torch.as_tensor(value).float()[y1:y2, x1:x2]
+        return torch.as_tensor(value).float()[..., y1:y2, x1:x2]
 
     def _rvf_instance(
             self, package, amplitude_presence, admission_presence,
