@@ -30,6 +30,27 @@ ROLE_VISUAL_FIELD_VARIANT_NAMES = (
     *(f'rvf_text_{name}' for name in ROLE_VISUAL_FIELD_COMPOSITIONS),
 )
 
+GLOBAL_LOCAL_EVIDENCE_PROTOCOL = 'global_local_evidence_v1'
+GLOBAL_LOCAL_EVIDENCE_SCHEMA_VERSION = 1
+GLOBAL_LOCAL_MIX_WEIGHTS = (
+    ('g025', 0.25),
+    ('g050', 0.50),
+    ('g075', 0.75),
+)
+GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES = (
+    'glv_official',
+    'glv_best_text',
+    'glv_anchor_local',
+    'glv_anchor_global',
+    'glv_text_local',
+    'glv_text_global',
+    *(f'glv_{family}_mix_{name}'
+      for family in ('anchor', 'text')
+      for name, _ in GLOBAL_LOCAL_MIX_WEIGHTS),
+    'glv_anchor_max',
+    'glv_text_max',
+)
+
 FUSION_AUDIT_PROTOCOL = 'overall_best_fusion_audit_v1'
 FUSION_AUDIT_SCHEMA_VERSION = 1
 FUSION_AUDIT_VARIANT_SPECS = (

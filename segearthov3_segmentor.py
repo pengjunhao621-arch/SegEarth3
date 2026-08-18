@@ -65,6 +65,7 @@ class SegEarthOV3Segmentation(
             role_prompt_tta_fusion_audit=False,
             role_prompt_tta_visual_field_diagnosis=False,
             role_prompt_tta_visual_field_registry=None,
+            role_prompt_tta_visual_field_mode='role_allocations',
             role_prompt_tta_selection_registry=None,
             **kwargs):
         super().__init__()
@@ -154,6 +155,8 @@ class SegEarthOV3Segmentation(
                 role_prompt_tta_visual_field_diagnosis),
             role_prompt_tta_visual_field_registry=(
                 role_prompt_tta_visual_field_registry),
+            role_prompt_tta_visual_field_mode=(
+                role_prompt_tta_visual_field_mode),
         )
 
     def _get_instance_score(self, state, instance_index):

@@ -24,6 +24,8 @@ from role_functional_text_definitions import (
     DEFAULT_SETTING,
     FUSION_AUDIT_MECHANISM_MAP_NAMES,
     FUSION_AUDIT_VARIANT_NAMES,
+    GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES,
+    GLOBAL_LOCAL_MIX_WEIGHTS,
     PI_MECHANISM_MAP_NAMES,
     PI_VARIANT_NAMES,
     PE_LAYER_IDS,
@@ -68,6 +70,7 @@ def static_checks():
         'tools/summarize_boundary_replay.py',
         'tools/summarize_class_role_alignment.py',
         'tools/summarize_overall_best_fusion_audit.py',
+        'tools/summarize_global_local_evidence.py',
         'tools/summarize_role_visual_field.py',
         'tools/verify_tiled_context.py',
     )
@@ -153,6 +156,9 @@ def static_checks():
     assert FUSION_AUDIT_VARIANT_NAMES[:2] == (
         'ofa_official', 'ofa_native')
     assert len(set(FUSION_AUDIT_MECHANISM_MAP_NAMES)) == 6
+    assert tuple(value for _, value in GLOBAL_LOCAL_MIX_WEIGHTS) == (
+        0.25, 0.50, 0.75)
+    assert len(set(GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES)) == 14
     assert len(ROLE_VISUAL_FIELD_COMPOSITIONS) == 8
     assert len(set(ROLE_VISUAL_FIELD_VARIANT_NAMES)) == 18
     assert DEFAULT_SETTING == 'alpha050_clip025'
@@ -179,6 +185,8 @@ def static_checks():
         'fusion audit records losing residuals, head takeover and class transitions',
         'visual-field screen has two views and all eight P/S/I assignments',
         'visual-field FFF is identity-anchored to official/current Role-Text',
+        'global/local screen keeps complete per-view grounding and three fixed mixtures',
+        'global/local oracle records complementarity without selecting predictions',
         'RemoteCLIP, CLIP APIs, training and online candidate selection are absent',
     ]
     return report
