@@ -48,7 +48,8 @@ run_eval() {
 }
 
 preflight() {
-    "${PYTHON_BIN}" -m unittest tests.test_role_multimodal_fusion
+    "${PYTHON_BIN}" -m unittest discover \
+        -s tests -p 'test_role_multimodal_fusion.py'
     "${PYTHON_BIN}" tools/preflight_role_functional_text_screen.py \
         --check-runtime-assets
     if [[ "${SKIP_TILED_PREFLIGHT}" == "1" ]]; then
