@@ -51,6 +51,33 @@ GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES = (
     'glv_text_max',
 )
 
+ROLE_MULTIMODAL_FUSION_PROTOCOL = 'role_multimodal_fusion_v1'
+ROLE_MULTIMODAL_FUSION_SCHEMA_VERSION = 1
+ROLE_MULTIMODAL_FUSION_BLEND = 0.5
+ROLE_MULTIMODAL_FUSION_WINDOW = 3
+ROLE_MULTIMODAL_FUSION_ROLE_SCOPES = ('p', 's', 'i', 'psi')
+ROLE_MULTIMODAL_FUSION_ANCHOR_METHODS = (
+    'v2_canvas_fine',
+    'v2_canvas_shared',
+    'v4_transport',
+    'v5_agreement',
+    'v6_qk',
+    'v7_value',
+    'v8_full',
+)
+ROLE_MULTIMODAL_FUSION_TEXT_METHODS = (
+    'v1_role_text',
+    *ROLE_MULTIMODAL_FUSION_ANCHOR_METHODS,
+)
+ROLE_MULTIMODAL_FUSION_VARIANT_NAMES = (
+    'rmf_v0_official',
+    *(f'rmf_{method}_anchor'
+      for method in ROLE_MULTIMODAL_FUSION_ANCHOR_METHODS),
+    *(f'rmf_{method}_{scope}'
+      for method in ROLE_MULTIMODAL_FUSION_TEXT_METHODS
+      for scope in ROLE_MULTIMODAL_FUSION_ROLE_SCOPES),
+)
+
 FUSION_AUDIT_PROTOCOL = 'overall_best_fusion_audit_v1'
 FUSION_AUDIT_SCHEMA_VERSION = 1
 FUSION_AUDIT_VARIANT_SPECS = (

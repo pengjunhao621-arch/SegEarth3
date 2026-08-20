@@ -462,6 +462,9 @@ class Sam3Processor:
             "encoder_vis_feat_sizes",
             "encoder_spatial_shapes",
             "encoder_level_start_index",
+            "encoder_out",
+            "decoder_queries",
+            "decoder_presence_features",
             "semantic_mask_raw_logits",
         ]
         for key in keys_to_del:
@@ -487,6 +490,25 @@ class Sam3Processor:
             geometric_prompt=state["geometric_prompt"],
             find_target=None,
         )
+        return self._update_state_from_outputs(state, outputs)
+
+    @torch.inference_mode()
+    def forward_grounding_from_encoder(
+            self, state: Dict, encoder_hidden_states: torch.Tensor):
+        """Replay the native decoder/heads from an experiment memory."""
+        if "encoder_out" not in state:
+            raise ValueError(
+                "A native text grounding must run before encoder replay.")
+        outputs = self.model.forward_grounding_from_encoder(
+            backbone_out=state["backbone_out"],
+            find_input=self.find_stage,
+            encoder_out=state["encoder_out"],
+            encoder_hidden_states=encoder_hidden_states,
+        )
+        return self._update_state_from_outputs(state, outputs)
+
+    def _update_state_from_outputs(self, state: Dict, outputs: Dict):
+        """Apply the unchanged SAM3 post-processing to grounding outputs."""
 
         out_bbox = outputs["pred_boxes"]
         out_logits = outputs["pred_logits"]
@@ -553,4 +575,7 @@ class Sam3Processor:
         state["encoder_vis_feat_sizes"] = encoder_out.get("vis_feat_sizes")
         state["encoder_spatial_shapes"] = encoder_out.get("spatial_shapes")
         state["encoder_level_start_index"] = encoder_out.get("level_start_index")
+        state["encoder_out"] = encoder_out
+        state["decoder_queries"] = outputs.get("queries")
+        state["decoder_presence_features"] = outputs.get("presence_feats")
         return state

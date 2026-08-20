@@ -71,10 +71,11 @@ class RoleVisualFieldMixin:
             raise ValueError(
                 'Visual-field diagnosis requires its registry JSON.')
         if self.role_prompt_tta_visual_field_mode not in (
-                'role_allocations', 'global_local'):
+                'role_allocations', 'global_local', 'multimodal_fusion'):
             raise ValueError(
                 'role_prompt_tta_visual_field_mode must be '
-                "'role_allocations' or 'global_local'.")
+                "'role_allocations', 'global_local', or "
+                "'multimodal_fusion'.")
         if self._rpt_role_selection is None:
             raise ValueError(
                 'Visual-field diagnosis requires the role-text selection.')
@@ -740,6 +741,8 @@ class RoleVisualFieldMixin:
     def _rvf_predict_image(self, image, image_path):
         if self.role_prompt_tta_visual_field_mode == 'global_local':
             return self._glv_predict_image(image, image_path)
+        if self.role_prompt_tta_visual_field_mode == 'multimodal_fusion':
+            return self._rmf_predict_image(image, image_path)
         (fine_query, fine_exact, fine_best, raw,
          unit_stats) = self._rvf_accumulate_visual_units(image, image_path)
         if self._rvf_fine_matches_official(image):
@@ -811,6 +814,9 @@ class RoleVisualFieldMixin:
             self, variants, metadata, data_sample, image_path):
         if self.role_prompt_tta_visual_field_mode == 'global_local':
             return self._glv_record_image(
+                variants, metadata, data_sample, image_path)
+        if self.role_prompt_tta_visual_field_mode == 'multimodal_fusion':
+            return self._rmf_record_image(
                 variants, metadata, data_sample, image_path)
         if not self.dump_role_prompt_tta_stats:
             return

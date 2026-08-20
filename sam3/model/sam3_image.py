@@ -462,18 +462,46 @@ class Sam3Image(torch.nn.Module):
             backbone_out, encoder_out, _ = self._run_encoder(
                 backbone_out, find_input, prompt, prompt_mask
             )
+        out = self.forward_grounding_from_encoder(
+            backbone_out=backbone_out,
+            find_input=find_input,
+            encoder_out=encoder_out,
+            encoder_hidden_states=encoder_out["encoder_hidden_states"],
+        )
+
+        if self.training or self.num_interactive_steps_val > 0:
+            self._compute_matching(out, self.back_convert(find_target))
+        return out
+
+    def forward_grounding_from_encoder(
+        self,
+        backbone_out,
+        find_input,
+        encoder_out,
+        encoder_hidden_states=None,
+    ):
+        """Run the native decoder/heads from a compatible encoder memory.
+
+        This is an experiment-only replay interface.  The default grounding
+        path calls it with the unmodified native memory, so no baseline
+        computation changes.  Counterfactual callers must retain the native
+        prompt, positional metadata, spatial shapes and backbone FPN.
+        """
+        memory = (
+            encoder_out["encoder_hidden_states"]
+            if encoder_hidden_states is None else encoder_hidden_states)
+        prompt = encoder_out["prompt_before_enc"]
+        prompt_mask = encoder_out["prompt_mask"]
         out = {
-            "encoder_hidden_states": encoder_out["encoder_hidden_states"],
+            "encoder_hidden_states": memory,
             "prev_encoder_out": {
                 "encoder_out": encoder_out,
                 "backbone_out": backbone_out,
             },
         }
-
-        # Run the decoder
         with torch.profiler.record_function("SAM3Image._run_decoder"):
             out, hs = self._run_decoder(
-                memory=out["encoder_hidden_states"],
+                memory=memory,
                 pos_embed=encoder_out["pos_embed"],
                 src_mask=encoder_out["padding_mask"],
                 out=out,
@@ -481,24 +509,17 @@ class Sam3Image(torch.nn.Module):
                 prompt_mask=prompt_mask,
                 encoder_out=encoder_out,
             )
-        # out: ['encoder_hidden_states', 'prev_encoder_out', 'presence_feats', 'queries', 'presence_logit_dec', 'pred_logits', 'pred_boxes', 'pred_boxes_xyxy']
-        # hs: [6, 1, 200, 256]
-
-        # Run segmentation heads
         with torch.profiler.record_function("SAM3Image._run_segmentation_heads"):
             self._run_segmentation_heads(
                 out=out,
                 backbone_out=backbone_out,
                 img_ids=find_input.img_ids,
                 vis_feat_sizes=encoder_out["vis_feat_sizes"],
-                encoder_hidden_states=out["encoder_hidden_states"],
+                encoder_hidden_states=memory,
                 prompt=prompt,
                 prompt_mask=prompt_mask,
                 hs=hs,
             )
-
-        if self.training or self.num_interactive_steps_val > 0:
-            self._compute_matching(out, self.back_convert(find_target))
         return out
 
     def _postprocess_out(self, out: Dict, multimask_output: bool = False):
