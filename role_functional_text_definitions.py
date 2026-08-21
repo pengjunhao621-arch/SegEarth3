@@ -78,6 +78,40 @@ ROLE_MULTIMODAL_FUSION_VARIANT_NAMES = (
       for scope in ROLE_MULTIMODAL_FUSION_ROLE_SCOPES),
 )
 
+CONTEXT_RECOMPOSITION_PROTOCOL = 'context_recomposition_v1'
+CONTEXT_RECOMPOSITION_SCHEMA_VERSION = 1
+CONTEXT_RECOMPOSITION_BLEND = 0.5
+CONTEXT_RECOMPOSITION_PROB_CLIP = 0.25
+CONTEXT_RECOMPOSITION_LOGIT_CLIP = 1.0
+CONTEXT_RECOMPOSITION_NEAR_RATIO = 0.25
+CONTEXT_RECOMPOSITION_LOWPASS_DIVISOR = 16
+CONTEXT_RECOMPOSITION_VARIANT_SPECS = (
+    ('cr_official', 'protected', 'official'),
+    ('cr_r0_native_role_text', 'r0', 'native_role_text'),
+    ('cr_r1_final_residual', 'r1', 'final_context_residual'),
+    ('cr_r2_semantic_residual', 'r2', 'semantic_context_residual'),
+    ('cr_r3_instance_residual', 'r3', 'instance_context_residual'),
+    ('cr_r4_si_native_presence', 'r4', 'si_native_presence'),
+    ('cr_r5_lowfreq_semantic', 'r5', 'low_frequency_semantic'),
+    ('cr_r6_foveated_si', 'r6', 'foveated_si'),
+    ('cr_r7_foveated_ring', 'r7', 'foveated_ring'),
+    ('cr_r8_role_context_did', 'r8', 'role_context_did'),
+    ('cr_r9_surround_only', 'r9', 'surround_only'),
+    ('cr_r9_target_scale_only', 'r9', 'target_scale_only'),
+    ('cr_r10_near_only', 'r10', 'near_only'),
+    ('cr_r10_far_only', 'r10', 'far_only'),
+    ('cr_r11_prior_only', 'r11', 'class_prior_only'),
+    ('cr_r11_spatial_only', 'r11', 'spatial_only'),
+    ('cr_r12_add_only', 'r12', 'positive_correction_only'),
+    ('cr_r12_suppress_only', 'r12', 'negative_correction_only'),
+    ('cr_r13_geometry_only', 'r13', 'aligned_geometry_only'),
+    ('cr_r13_scene_only', 'r13', 'geometry_permuted_scene_only'),
+    ('cr_r14_logodds', 'r14', 'log_odds_context'),
+    ('cr_r14_logodds_did', 'r14', 'log_odds_role_context_did'),
+)
+CONTEXT_RECOMPOSITION_VARIANT_NAMES = tuple(
+    name for name, _, _ in CONTEXT_RECOMPOSITION_VARIANT_SPECS)
+
 FUSION_AUDIT_PROTOCOL = 'overall_best_fusion_audit_v1'
 FUSION_AUDIT_SCHEMA_VERSION = 1
 FUSION_AUDIT_VARIANT_SPECS = (

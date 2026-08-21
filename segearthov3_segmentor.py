@@ -16,6 +16,7 @@ from PIL import Image
 
 from boundary_replay import BoundaryReplayMixin
 from class_role_alignment import ClassRoleAlignmentMixin
+from context_recomposition import ContextRecompositionMixin
 from role_functional_text_screen import RoleFunctionalTextScreenMixin
 from role_multimodal_fusion import RoleMultimodalFusionMixin
 from role_visual_field import RoleVisualFieldMixin
@@ -26,7 +27,8 @@ from sam3.model.sam3_image_processor import Sam3Processor
 
 @MODELS.register_module()
 class SegEarthOV3Segmentation(
-        RoleMultimodalFusionMixin, RoleVisualFieldMixin,
+        ContextRecompositionMixin, RoleMultimodalFusionMixin,
+        RoleVisualFieldMixin,
         ClassRoleAlignmentMixin, BoundaryReplayMixin,
         RoleFunctionalTextScreenMixin, BaseSegmentor):
     """Frozen SAM3 segmentor with one config-gated diagnostic extension."""

@@ -71,11 +71,12 @@ class RoleVisualFieldMixin:
             raise ValueError(
                 'Visual-field diagnosis requires its registry JSON.')
         if self.role_prompt_tta_visual_field_mode not in (
-                'role_allocations', 'global_local', 'multimodal_fusion'):
+                'role_allocations', 'global_local', 'multimodal_fusion',
+                'context_recomposition'):
             raise ValueError(
                 'role_prompt_tta_visual_field_mode must be '
                 "'role_allocations', 'global_local', or "
-                "'multimodal_fusion'.")
+                "'multimodal_fusion', or 'context_recomposition'.")
         if self._rpt_role_selection is None:
             raise ValueError(
                 'Visual-field diagnosis requires the role-text selection.')
@@ -743,6 +744,8 @@ class RoleVisualFieldMixin:
             return self._glv_predict_image(image, image_path)
         if self.role_prompt_tta_visual_field_mode == 'multimodal_fusion':
             return self._rmf_predict_image(image, image_path)
+        if self.role_prompt_tta_visual_field_mode == 'context_recomposition':
+            return self._cr_predict_image(image, image_path)
         (fine_query, fine_exact, fine_best, raw,
          unit_stats) = self._rvf_accumulate_visual_units(image, image_path)
         if self._rvf_fine_matches_official(image):
@@ -817,6 +820,9 @@ class RoleVisualFieldMixin:
                 variants, metadata, data_sample, image_path)
         if self.role_prompt_tta_visual_field_mode == 'multimodal_fusion':
             return self._rmf_record_image(
+                variants, metadata, data_sample, image_path)
+        if self.role_prompt_tta_visual_field_mode == 'context_recomposition':
+            return self._cr_record_image(
                 variants, metadata, data_sample, image_path)
         if not self.dump_role_prompt_tta_stats:
             return
