@@ -94,6 +94,9 @@ class JointRoleViewTest(unittest.TestCase):
             global_source='aligned_context', reference_endpoint='local',
             role_candidates=candidates, anchor_candidate='anchor',
             current_role_candidate='current', prior_view_operator='max',
+            prior_view_miou=54.54545454545454,
+            reference_identity_max_abs=0.0,
+            native_prompt_parity_max_abs=0.0,
             operator_specs=operator_specs, variants=variants,
             complementarity={
                 candidate['id']: dict(
@@ -114,6 +117,9 @@ class JointRoleViewTest(unittest.TestCase):
             'sequential_role_view', 'current_role_best_view',
             'joint_role_view_best'})
         self.assertEqual(len(result['profile_macros']), 6)
+        self.assertEqual(len(result['reproduction']), 1)
+        self.assertAlmostEqual(
+            result['reproduction'][0]['reference_identity_max_abs'], 0.0)
 
 
 if __name__ == '__main__':

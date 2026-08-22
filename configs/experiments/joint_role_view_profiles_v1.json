@@ -9,6 +9,7 @@
       "anchor_candidate": "anchor",
       "current_role_candidate": "current",
       "prior_view_operator": "max",
+      "prior_view_miou": 48.80640737033083,
       "role_candidates": [
         {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 47.34174540097308},
         {"id": "current", "slots": [1, 1, 0], "admission": "native", "source_miou": 48.304995222975805},
@@ -22,6 +23,7 @@
       "anchor_candidate": "anchor",
       "current_role_candidate": "current",
       "prior_view_operator": "linear_g050",
+      "prior_view_miou": 53.07535662154067,
       "role_candidates": [
         {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 44.30306795299408},
         {"id": "current", "slots": [0, 3, 2], "admission": "native", "source_miou": 50.52946987899611},
@@ -36,6 +38,7 @@
       "anchor_candidate": "anchor",
       "current_role_candidate": "current",
       "prior_view_operator": "linear_g075",
+      "prior_view_miou": 63.18063792238241,
       "role_candidates": [
         {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 57.86661417693518},
         {"id": "current", "slots": [1, 2, 0], "admission": "anchor_admission", "source_miou": 58.59495367756394},
@@ -50,6 +53,7 @@
       "anchor_candidate": "anchor",
       "current_role_candidate": "current",
       "prior_view_operator": "global",
+      "prior_view_miou": 72.88789256770835,
       "role_candidates": [
         {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 71.80436372618071},
         {"id": "current", "slots": [1, 2, 2], "admission": "anchor_admission", "source_miou": 72.88588420241737},
@@ -64,6 +68,7 @@
       "anchor_candidate": "anchor",
       "current_role_candidate": "current",
       "prior_view_operator": "max",
+      "prior_view_miou": 65.19980439181302,
       "role_candidates": [
         {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 60.859535895233876},
         {"id": "current", "slots": [0, 3, 1], "admission": "native", "source_miou": 62.35103962597586},
@@ -78,6 +83,7 @@
       "anchor_candidate": "anchor",
       "current_role_candidate": "current",
       "prior_view_operator": "global",
+      "prior_view_miou": 66.11579965064145,
       "role_candidates": [
         {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 64.10725626416223},
         {"id": "current", "slots": [2, 1, 1], "admission": "anchor_admission", "source_miou": 66.12255511869064},

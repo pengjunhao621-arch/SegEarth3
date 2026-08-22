@@ -1031,6 +1031,7 @@ class RoleVisualFieldMixin:
             current_role_candidate=self._jrv_config[
                 'current_role_candidate'],
             prior_view_operator=self._jrv_config['prior_view_operator'],
+            prior_view_miou=float(self._jrv_config['prior_view_miou']),
             local_size=int(self._rvf_config['fine_size']),
             context_size=int(self._rvf_config['context_size']),
             source_mode=self._rvf_config['source_mode'],

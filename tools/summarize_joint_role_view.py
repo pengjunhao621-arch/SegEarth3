@@ -124,7 +124,7 @@ def summarize(records):
         grouped[str(record['dataset_name']).lower()].append(record)
 
     all_rows, profile_rows, class_rows = [], [], []
-    interaction_rows, complement_rows = [], []
+    interaction_rows, complement_rows, reproduction_rows = [], [], []
     dataset_payloads = {}
     for dataset, values in sorted(grouped.items()):
         first = values[0]['joint_role_view']
@@ -142,6 +142,7 @@ def summarize(records):
             anchor_candidate=first['anchor_candidate'],
             current_role_candidate=first['current_role_candidate'],
             prior_view_operator=first['prior_view_operator'],
+            prior_view_miou=first['prior_view_miou'],
             operator_specs=first['operator_specs'],
         )
         for record in values:
@@ -177,6 +178,33 @@ def summarize(records):
         role_only = metrics[role_only_name]
         sequential_name = _variant_name(
             current, contract['prior_view_operator'], anchor)
+        candidates = {
+            candidate['id']: candidate
+            for candidate in contract['role_candidates']}
+        expected_role_miou = float(candidates[current]['source_miou'])
+        measured_sequential_miou = metrics[sequential_name]['miou']
+        reproduction_rows.append(dict(
+            dataset=dataset,
+            current_role_candidate=current,
+            reference_endpoint=endpoint,
+            expected_role_only_miou=expected_role_miou,
+            measured_role_only_miou=role_only['miou'],
+            role_only_reproduction_delta=(
+                role_only['miou'] - expected_role_miou),
+            prior_view_operator=contract['prior_view_operator'],
+            expected_sequential_miou=contract['prior_view_miou'],
+            measured_sequential_miou=measured_sequential_miou,
+            sequential_reproduction_delta=(
+                measured_sequential_miou - contract['prior_view_miou']),
+            reference_identity_max_abs=max(
+                float(value['joint_role_view'][
+                    'reference_identity_max_abs'])
+                for value in values),
+            native_prompt_parity_max_abs=max(
+                float(value['joint_role_view'][
+                    'native_prompt_parity_max_abs'])
+                for value in values),
+        ))
 
         anchor_names = [
             _variant_name(anchor, operator, anchor)
@@ -368,6 +396,7 @@ def summarize(records):
         interactions=interaction_rows,
         complementarity=complement_rows,
         operators=operator_rows,
+        reproduction=reproduction_rows,
     )
 
 
@@ -399,6 +428,22 @@ def write_report(path, result, missing, duplicates):
             f"{_fmt(rows['sequential_role_view']['miou'])} | "
             f"{_fmt(rows['current_role_best_view']['miou'])} | "
             f"{_fmt(joint['miou'])} | {profile} |")
+    lines.extend(['', '## Reproduction audit', '',
+                  '| Dataset | Role expected | Role measured | Delta | '
+                  'Sequential expected | Sequential measured | Delta | '
+                  'Identity max abs | Prompt parity max abs |',
+                  '|---|---:|---:|---:|---:|---:|---:|---:|---:|'])
+    for row in result['reproduction']:
+        lines.append(
+            f"| {row['dataset']} | "
+            f"{_fmt(row['expected_role_only_miou'])} | "
+            f"{_fmt(row['measured_role_only_miou'])} | "
+            f"{_fmt(row['role_only_reproduction_delta'])} | "
+            f"{_fmt(row['expected_sequential_miou'])} | "
+            f"{_fmt(row['measured_sequential_miou'])} | "
+            f"{_fmt(row['sequential_reproduction_delta'])} | "
+            f"{row['reference_identity_max_abs']:.3e} | "
+            f"{row['native_prompt_parity_max_abs']:.3e} |")
     lines.extend(['', '## Common View operator comparison', '',
                   '| Operator | Current Role macro | Positive | '
                   'Best Role macro | Positive |',
@@ -442,7 +487,8 @@ def main():
     result = summarize(records)
     os.makedirs(args.out_dir, exist_ok=True)
     for name in ('variants', 'profiles', 'profile_macros', 'classes',
-                 'interactions', 'complementarity', 'operators'):
+                 'interactions', 'complementarity', 'operators',
+                 'reproduction'):
         write_csv(
             os.path.join(args.out_dir, f'joint_role_view_{name}.csv'),
             result[name])

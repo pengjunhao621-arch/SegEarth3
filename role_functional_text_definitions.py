@@ -389,11 +389,13 @@ def load_joint_role_view_registry(path, dataset):
         raise ValueError(f'{key}: anchor candidate must use P0+S0+I0.')
     if prior_view not in JOINT_ROLE_VIEW_OPERATOR_NAMES:
         raise ValueError(f'{key}: unknown prior_view_operator={prior_view!r}.')
+    prior_view_miou = float(record['prior_view_miou'])
     record['role_candidates'] = tuple(normalized)
     record['_candidate_ids'] = tuple(value['id'] for value in normalized)
     record['anchor_candidate'] = anchor
     record['current_role_candidate'] = current
     record['prior_view_operator'] = prior_view
+    record['prior_view_miou'] = prior_view_miou
     record['_dataset'] = key
     record['_path'] = path
     return record
