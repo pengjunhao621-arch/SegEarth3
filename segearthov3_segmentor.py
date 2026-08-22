@@ -70,6 +70,7 @@ class SegEarthOV3Segmentation(
             role_prompt_tta_visual_field_diagnosis=False,
             role_prompt_tta_visual_field_registry=None,
             role_prompt_tta_visual_field_mode='role_allocations',
+            role_prompt_tta_joint_profile_registry=None,
             role_prompt_tta_selection_registry=None,
             **kwargs):
         super().__init__()
@@ -161,6 +162,8 @@ class SegEarthOV3Segmentation(
                 role_prompt_tta_visual_field_registry),
             role_prompt_tta_visual_field_mode=(
                 role_prompt_tta_visual_field_mode),
+            role_prompt_tta_joint_profile_registry=(
+                role_prompt_tta_joint_profile_registry),
         )
 
     def _get_instance_score(self, state, instance_index):
@@ -575,12 +578,8 @@ class SegEarthOV3Segmentation(
                     class_logits = F.interpolate(
                         class_logits.unsqueeze(0), size=original_shape,
                         mode='bilinear', align_corners=False).squeeze(0)
-                    variants = {
-                        name: F.interpolate(
-                            value.unsqueeze(0), size=original_shape,
-                            mode='bilinear', align_corners=False).squeeze(0)
-                        for name, value in variants.items()
-                    }
+                    variants = self._rvf_resize_variants(
+                        variants, original_shape)
                 prediction = class_logits.argmax(dim=0)
                 prediction[class_logits.max(dim=0)[0] < self.prob_thd] = (
                     self.bg_idx)

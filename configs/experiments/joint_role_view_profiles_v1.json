@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "protocol": "joint_role_view_profile_v1",
+  "source_role_experiment": "role_text_completion_v1_full_99f03ff",
+  "source_view_experiment": "global_local_evidence_v1_full_f57dfc8",
+  "note": "Each compact candidate set contains the official anchor, the current Role Profile, and previously measured positive alternatives. View operators are shared across datasets; only the selected profile may differ.",
+  "datasets": {
+    "loveda": {
+      "anchor_candidate": "anchor",
+      "current_role_candidate": "current",
+      "prior_view_operator": "max",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 47.34174540097308},
+        {"id": "current", "slots": [1, 1, 0], "admission": "native", "source_miou": 48.304995222975805},
+        {"id": "all_nonzero", "slots": [1, 1, 1], "admission": "anchor_admission", "source_miou": 48.25112318311641},
+        {"id": "alt_i2", "slots": [1, 1, 2], "admission": "native", "source_miou": 48.23127279636575},
+        {"id": "semantic_only", "slots": [0, 1, 0], "admission": "native", "source_miou": 48.08534136023699},
+        {"id": "presence_only", "slots": [1, 0, 0], "admission": "native", "source_miou": 48.00580009675897}
+      ]
+    },
+    "openearthmap": {
+      "anchor_candidate": "anchor",
+      "current_role_candidate": "current",
+      "prior_view_operator": "linear_g050",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 44.30306795299408},
+        {"id": "current", "slots": [0, 3, 2], "admission": "native", "source_miou": 50.52946987899611},
+        {"id": "alt_s1", "slots": [0, 1, 2], "admission": "native", "source_miou": 50.42415939704439},
+        {"id": "instance_only", "slots": [0, 0, 2], "admission": "native", "source_miou": 50.18147022824485},
+        {"id": "alt_s2", "slots": [0, 2, 2], "admission": "native", "source_miou": 49.15587294685937},
+        {"id": "all_nonzero", "slots": [2, 3, 2], "admission": "anchor_admission", "source_miou": 47.914102033635054},
+        {"id": "alt_p1", "slots": [1, 3, 2], "admission": "anchor_admission", "source_miou": 47.67856016460066}
+      ]
+    },
+    "potsdam": {
+      "anchor_candidate": "anchor",
+      "current_role_candidate": "current",
+      "prior_view_operator": "linear_g075",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 57.86661417693518},
+        {"id": "current", "slots": [1, 2, 0], "admission": "anchor_admission", "source_miou": 58.59495367756394},
+        {"id": "presence_only", "slots": [1, 0, 0], "admission": "native", "source_miou": 58.42534712004329},
+        {"id": "alt_s3", "slots": [1, 3, 0], "admission": "native", "source_miou": 58.127906782912476},
+        {"id": "all_nonzero", "slots": [1, 2, 1], "admission": "anchor_admission", "source_miou": 58.143564040802374},
+        {"id": "semantic_only", "slots": [0, 2, 0], "admission": "native", "source_miou": 58.00216411333437},
+        {"id": "presence_instance", "slots": [1, 0, 1], "admission": "native", "source_miou": 58.02137439216947}
+      ]
+    },
+    "udd5": {
+      "anchor_candidate": "anchor",
+      "current_role_candidate": "current",
+      "prior_view_operator": "global",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 71.80436372618071},
+        {"id": "current", "slots": [1, 2, 2], "admission": "anchor_admission", "source_miou": 72.88588420241737},
+        {"id": "alt_s3", "slots": [1, 3, 2], "admission": "native", "source_miou": 72.816716729101},
+        {"id": "alt_roles", "slots": [2, 2, 1], "admission": "native", "source_miou": 72.7648842390637},
+        {"id": "no_instance", "slots": [1, 2, 0], "admission": "native", "source_miou": 72.66293472570725},
+        {"id": "p2_no_instance", "slots": [2, 2, 0], "admission": "native", "source_miou": 72.65002568839893},
+        {"id": "semantic_only", "slots": [0, 2, 0], "admission": "native", "source_miou": 72.62757593134477}
+      ]
+    },
+    "vaihingen": {
+      "anchor_candidate": "anchor",
+      "current_role_candidate": "current",
+      "prior_view_operator": "max",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 60.859535895233876},
+        {"id": "current", "slots": [0, 3, 1], "admission": "native", "source_miou": 62.35103962597586},
+        {"id": "all_nonzero", "slots": [1, 3, 1], "admission": "anchor_admission", "source_miou": 62.26470277163838},
+        {"id": "semantic_only", "slots": [0, 3, 0], "admission": "native", "source_miou": 61.56553599204288},
+        {"id": "semantic_i2", "slots": [0, 3, 2], "admission": "native", "source_miou": 61.553754185829966},
+        {"id": "instance_only", "slots": [0, 0, 1], "admission": "native", "source_miou": 61.5267504421822},
+        {"id": "presence_instance", "slots": [1, 0, 1], "admission": "native", "source_miou": 61.37372221013181}
+      ]
+    },
+    "vdd": {
+      "anchor_candidate": "anchor",
+      "current_role_candidate": "current",
+      "prior_view_operator": "global",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 64.10725626416223},
+        {"id": "current", "slots": [2, 1, 1], "admission": "anchor_admission", "source_miou": 66.12255511869064},
+        {"id": "no_instance", "slots": [2, 1, 0], "admission": "native", "source_miou": 65.83082718443639},
+        {"id": "p1_all", "slots": [1, 1, 1], "admission": "native", "source_miou": 65.76523306330847},
+        {"id": "p1_no_instance", "slots": [1, 1, 0], "admission": "native", "source_miou": 65.72825134099747},
+        {"id": "alt_i2", "slots": [2, 1, 2], "admission": "native", "source_miou": 65.72195322673558},
+        {"id": "alt_s3", "slots": [2, 3, 1], "admission": "native", "source_miou": 65.71267063855576}
+      ]
+    }
+  }
+}

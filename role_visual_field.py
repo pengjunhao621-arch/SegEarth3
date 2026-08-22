@@ -5,16 +5,21 @@ import os
 from collections import OrderedDict
 
 import torch
+import torch.nn.functional as F
 
 from role_functional_text_definitions import (
     GLOBAL_LOCAL_EVIDENCE_PROTOCOL,
     GLOBAL_LOCAL_EVIDENCE_SCHEMA_VERSION,
     GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES,
     GLOBAL_LOCAL_MIX_WEIGHTS,
+    JOINT_ROLE_VIEW_OPERATOR_SPECS,
+    JOINT_ROLE_VIEW_PROTOCOL,
+    JOINT_ROLE_VIEW_SCHEMA_VERSION,
     ROLE_VISUAL_FIELD_COMPOSITIONS,
     ROLE_VISUAL_FIELD_PROTOCOL,
     ROLE_VISUAL_FIELD_SCHEMA_VERSION,
     ROLE_VISUAL_FIELD_VARIANT_NAMES,
+    load_joint_role_view_registry,
 )
 from sam3.model.data_misc import interpolate as sam3_interpolate
 from tiled_context import CoordinateTileIndex
@@ -28,6 +33,9 @@ GLV_PROTOCOL = GLOBAL_LOCAL_EVIDENCE_PROTOCOL
 GLV_SCHEMA_VERSION = GLOBAL_LOCAL_EVIDENCE_SCHEMA_VERSION
 GLV_VARIANT_NAMES = GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES
 GLV_MIX_WEIGHTS = GLOBAL_LOCAL_MIX_WEIGHTS
+JRV_PROTOCOL = JOINT_ROLE_VIEW_PROTOCOL
+JRV_SCHEMA_VERSION = JOINT_ROLE_VIEW_SCHEMA_VERSION
+JRV_OPERATOR_SPECS = JOINT_ROLE_VIEW_OPERATOR_SPECS
 
 
 def load_visual_field_registry(path, dataset):
@@ -56,7 +64,8 @@ class RoleVisualFieldMixin:
     def _rvf_initialize(
             self, role_prompt_tta_visual_field_diagnosis=False,
             role_prompt_tta_visual_field_registry=None,
-            role_prompt_tta_visual_field_mode='role_allocations'):
+            role_prompt_tta_visual_field_mode='role_allocations',
+            role_prompt_tta_joint_profile_registry=None):
         self.role_prompt_tta_visual_field_diagnosis = bool(
             role_prompt_tta_visual_field_diagnosis)
         self.role_prompt_tta_visual_field_registry = (
@@ -64,6 +73,7 @@ class RoleVisualFieldMixin:
         self.role_prompt_tta_visual_field_mode = str(
             role_prompt_tta_visual_field_mode)
         self._rvf_config = None
+        self._jrv_config = None
         self._rvf_tile_indices = {}
         if not self.role_prompt_tta_visual_field_diagnosis:
             return
@@ -72,17 +82,25 @@ class RoleVisualFieldMixin:
                 'Visual-field diagnosis requires its registry JSON.')
         if self.role_prompt_tta_visual_field_mode not in (
                 'role_allocations', 'global_local', 'multimodal_fusion',
-                'context_recomposition'):
+                'context_recomposition', 'joint_role_view'):
             raise ValueError(
                 'role_prompt_tta_visual_field_mode must be '
                 "'role_allocations', 'global_local', or "
-                "'multimodal_fusion', or 'context_recomposition'.")
+                "'multimodal_fusion', 'context_recomposition', or "
+                "'joint_role_view'.")
         if self._rpt_role_selection is None:
             raise ValueError(
                 'Visual-field diagnosis requires the role-text selection.')
         self._rvf_config = load_visual_field_registry(
             role_prompt_tta_visual_field_registry,
             self.role_prompt_tta_dataset_name)
+        if self.role_prompt_tta_visual_field_mode == 'joint_role_view':
+            if not role_prompt_tta_joint_profile_registry:
+                raise ValueError(
+                    'Joint Role--View mode requires its profile registry.')
+            self._jrv_config = load_joint_role_view_registry(
+                role_prompt_tta_joint_profile_registry,
+                self.role_prompt_tta_dataset_name)
 
     def _uses_role_visual_field(self):
         return bool(getattr(
@@ -118,8 +136,8 @@ class RoleVisualFieldMixin:
                   height - context_height)
         return left, top, left + context_width, top + context_height
 
-    def _rvf_ground_view(self, image):
-        """Ground only official aliases and the registered role candidates."""
+    def _rvf_ground_view(self, image, role_candidates=None):
+        """Ground official aliases and only the requested Role candidates."""
         output_shape = (image.height, image.width)
         cache = self._rpt_prepare_text_cache()
         with torch.no_grad(), self._rpt_autocast_context():
@@ -129,17 +147,22 @@ class RoleVisualFieldMixin:
             for prompt in self.query_words
         }
         slots = self._rpt_role_selection['_best_overall_slots']
+        candidate_slots = [slots]
+        if role_candidates is not None:
+            candidate_slots = [
+                tuple(value['slots']) for value in role_candidates]
         fields = (
             ('presence', 'presence_candidates'),
             ('semantic', 'semantic_candidates'),
             ('instance', 'instance_candidates'),
         )
         for item in self._rpt_prompt_bank['classes']:
-            for (role, field), slot in zip(fields, slots):
-                if slot:
-                    requirements.setdefault(
-                        item[field][slot - 1], set()).add(
-                            'raw' if role == 'instance' else role)
+            for requested in candidate_slots:
+                for (role, field), slot in zip(fields, requested):
+                    if slot:
+                        requirements.setdefault(
+                            item[field][slot - 1], set()).add(
+                                'raw' if role == 'instance' else role)
 
         packages = {}
         query_finals = {}
@@ -242,10 +265,23 @@ class RoleVisualFieldMixin:
                 else:
                     selected[role] = None
                     selected_prompts[role] = list(item['official_prompts'])
+            role_packages = {}
+            role_indices = dict(presence=0, semantic=1, instance=2)
+            for role, field in fields:
+                index = role_indices[role]
+                requested = sorted({
+                    int(value[index]) for value in candidate_slots
+                    if int(value[index]) > 0
+                })
+                role_packages[role] = {
+                    slot: packages[item[field][slot - 1]]
+                    for slot in requested
+                }
             classes.append(dict(
                 anchor=anchor,
                 selected=selected,
                 selected_prompts=selected_prompts,
+                role_packages=role_packages,
             ))
         del state
         return dict(
@@ -303,7 +339,8 @@ class RoleVisualFieldMixin:
             selected.numel())
 
     def _rvf_compose_class(self, fine, context, class_index, composition,
-                           family, fine_roi, context_roi, instance_cache):
+                           family, fine_roi, context_roi, instance_cache,
+                           slots=None, admission_mode=None):
         views = {'F': (fine, fine_roi), 'C': (context, context_roi)}
         p_view, s_view, i_view = composition
         p_data, _ = views[p_view]
@@ -312,26 +349,33 @@ class RoleVisualFieldMixin:
         p_class = p_data['classes'][class_index]
         s_class = s_data['classes'][class_index]
         i_class = i_data['classes'][class_index]
+        slots = tuple(
+            self._rpt_role_selection['_best_overall_slots']
+            if slots is None else slots)
+        admission_mode = (
+            self._rpt_role_selection['best_overall']['admission']
+            if admission_mode is None else str(admission_mode))
         alpha, clip = 0.5, 0.25
 
         presence = torch.as_tensor(
             p_class['anchor']['presence']).float().reshape(())
-        if family == 'text' and p_class['selected']['presence'] is not None:
+        presence_package = p_class['role_packages']['presence'].get(slots[0])
+        if family == 'text' and presence_package is not None:
             presence, _ = self._rft_bounded(
-                presence, p_class['selected']['presence']['presence'],
+                presence, presence_package['presence'],
                 alpha, clip)
 
         semantic = self._rvf_crop(s_class['anchor']['semantic'], s_roi)
-        if family == 'text' and s_class['selected']['semantic'] is not None:
+        semantic_package = s_class['role_packages']['semantic'].get(slots[1])
+        if family == 'text' and semantic_package is not None:
             candidate = self._rvf_crop(
-                s_class['selected']['semantic']['semantic'], s_roi)
+                semantic_package['semantic'], s_roi)
             semantic, _ = self._rft_bounded(
                 semantic, candidate, alpha, clip)
 
         admission = presence
         if (family == 'text'
-                and self._rpt_role_selection['best_overall']['admission']
-                == 'anchor_admission'):
+                and admission_mode == 'anchor_admission'):
             admission = torch.as_tensor(
                 i_class['anchor']['presence']).float().reshape(())
 
@@ -347,8 +391,9 @@ class RoleVisualFieldMixin:
 
         anchor_instance = instance(i_class['anchor'], i_view)
         instance_map = anchor_instance
-        if family == 'text' and i_class['selected']['instance'] is not None:
-            candidate = instance(i_class['selected']['instance'], i_view)
+        instance_package = i_class['role_packages']['instance'].get(slots[2])
+        if family == 'text' and instance_package is not None:
+            candidate = instance(instance_package, i_view)
             instance_map, _ = self._rft_bounded(
                 anchor_instance, candidate, alpha, clip)
         return self._rft_role_final(
@@ -739,7 +784,267 @@ class RoleVisualFieldMixin:
         )
         return official_query.to(self.device), variants, metadata
 
+    def _jrv_ground_target(self, view, roi, candidates):
+        """Compose every retained Role candidate on one coherent view."""
+        official = self._rvf_crop(
+            self._aggregate_query_logits_to_classes(view['query_final']), roi)
+        cache = {}
+        anchor = torch.stack([
+            self._rvf_compose_class(
+                view, view, class_index, 'FFF', 'anchor', roi, roi, cache,
+                slots=(0, 0, 0), admission_mode='native')
+            for class_index in range(self.num_cls)
+        ])
+        role_maps = OrderedDict()
+        for candidate in candidates:
+            role_value = torch.stack([
+                self._rvf_compose_class(
+                    view, view, class_index, 'FFF', 'text', roi, roi, cache,
+                    slots=candidate['slots'],
+                    admission_mode=candidate['admission'])
+                for class_index in range(self.num_cls)
+            ])
+            role_maps[candidate['id']] = (
+                official + role_value - anchor).clamp(0.0, 1.0)
+        return official, role_maps
+
+    def _jrv_accumulate_visual_units(
+            self, image, image_path, need_context, candidates):
+        """Accumulate all retained Role candidates for Local/Context views."""
+        height, width = image.height, image.width
+        counts = torch.zeros((1, height, width), dtype=torch.float32)
+        local_query_sum = torch.zeros(
+            (self.num_queries, height, width), dtype=torch.float32)
+        local_official_sum = torch.zeros(
+            (self.num_cls, height, width), dtype=torch.float32)
+        local_role_sums = OrderedDict(
+            (value['id'], torch.zeros_like(local_official_sum))
+            for value in candidates)
+        context_query_sum = (
+            torch.zeros_like(local_query_sum) if need_context else None)
+        context_official_sum = (
+            torch.zeros_like(local_official_sum) if need_context else None)
+        context_role_sums = (
+            OrderedDict(
+                (value['id'], torch.zeros_like(local_official_sum))
+                for value in candidates)
+            if need_context else None)
+        unit_stats, context_cache = [], {}
+        for unit_index, unit in enumerate(
+                self._rvf_visual_units(image, image_path)):
+            x1, y1, x2, y2 = unit['target_box']
+            fine = self._rvf_ground_view(unit['fine'], candidates)
+            local_official, local_roles = self._jrv_ground_target(
+                fine, unit['fine_roi'], candidates)
+            local_query_sum[:, y1:y2, x1:x2] += self._rvf_crop(
+                fine['query_final'], unit['fine_roi'])
+            local_official_sum[:, y1:y2, x1:x2] += local_official
+            for identifier, value in local_roles.items():
+                local_role_sums[identifier][:, y1:y2, x1:x2] += value
+            counts[:, y1:y2, x1:x2] += 1.0
+
+            if need_context:
+                context_key = (
+                    unit['metadata']['source_prefix'],
+                    tuple(unit['metadata']['source_canvas']),
+                    tuple(unit['metadata']['context_box']),
+                )
+                if context_key not in context_cache:
+                    context_cache[context_key] = self._rvf_ground_view(
+                        unit['context'], candidates)
+                context = context_cache[context_key]
+                context_official, context_roles = self._jrv_ground_target(
+                    context, unit['context_roi'], candidates)
+                context_query_sum[:, y1:y2, x1:x2] += self._rvf_crop(
+                    context['query_final'], unit['context_roi'])
+                context_official_sum[:, y1:y2, x1:x2] += context_official
+                for identifier, value in context_roles.items():
+                    context_role_sums[identifier][:, y1:y2, x1:x2] += value
+
+            unit_stats.append(dict(
+                unit_index=int(unit_index),
+                target_box=list(unit['target_box']),
+                local_size=[unit['fine'].width, unit['fine'].height],
+                context_size=[unit['context'].width, unit['context'].height],
+                context_roi=list(unit['context_roi']),
+                source_prefix=unit['metadata']['source_prefix'],
+                source_canvas=unit['metadata']['source_canvas'],
+                context_box=unit['metadata']['context_box'],
+                contributor_tiles=unit['metadata']['contributor_tiles'],
+            ))
+            del fine, local_roles
+
+        if torch.any(counts == 0):
+            raise RuntimeError('Joint Role--View units left uncovered pixels.')
+
+        def finalize(query_sum, official_sum, role_sums):
+            query = query_sum / counts
+            exact = self._aggregate_query_logits_to_classes(query)
+            unit_official = official_sum / counts
+            roles = OrderedDict(
+                (identifier, (
+                    exact + value / counts - unit_official).clamp(0.0, 1.0))
+                for identifier, value in role_sums.items())
+            return query, exact, roles
+
+        local_query, local_anchor, local_roles = finalize(
+            local_query_sum, local_official_sum, local_role_sums)
+        result = dict(
+            local_query=local_query,
+            local_anchor=local_anchor,
+            local_roles=local_roles,
+            context_anchor=None,
+            context_roles=None,
+            units=unit_stats,
+            unique_context_views=len(context_cache),
+        )
+        if need_context:
+            _, context_anchor, context_roles = finalize(
+                context_query_sum, context_official_sum, context_role_sums)
+            result.update(
+                context_anchor=context_anchor,
+                context_roles=context_roles,
+            )
+        return result
+
+    def _jrv_accumulate_official_units(self, image, candidates):
+        """Reproduce the official observation while retaining Role candidates."""
+        use_sliding = (
+            self.slide_crop > 0
+            and (self.slide_crop < image.width
+                 or self.slide_crop < image.height))
+        boxes = (self._rvf_grid_boxes(
+            image.width, image.height, self.slide_crop, self.slide_stride)
+            if use_sliding else [(0, 0, image.width, image.height)])
+        height, width = image.height, image.width
+        counts = torch.zeros((1, height, width), dtype=torch.float32)
+        query_sum = torch.zeros(
+            (self.num_queries, height, width), dtype=torch.float32)
+        official_sum = torch.zeros(
+            (self.num_cls, height, width), dtype=torch.float32)
+        role_sums = OrderedDict(
+            (value['id'], torch.zeros_like(official_sum))
+            for value in candidates)
+        for box in boxes:
+            x1, y1, x2, y2 = box
+            view = self._rvf_ground_view(image.crop(box), candidates)
+            roi = (0, 0, x2 - x1, y2 - y1)
+            official, roles = self._jrv_ground_target(
+                view, roi, candidates)
+            query_sum[:, y1:y2, x1:x2] += view['query_final']
+            official_sum[:, y1:y2, x1:x2] += official
+            for identifier, value in roles.items():
+                role_sums[identifier][:, y1:y2, x1:x2] += value
+            counts[:, y1:y2, x1:x2] += 1.0
+            del view, roles
+        query = query_sum / counts
+        exact = self._aggregate_query_logits_to_classes(query)
+        unit_official = official_sum / counts
+        roles = OrderedDict(
+            (identifier, (
+                exact + value / counts - unit_official).clamp(0.0, 1.0))
+            for identifier, value in role_sums.items())
+        return query, exact, roles
+
+    @staticmethod
+    def _jrv_fuse_views(local, global_value, family, global_weight, rho):
+        """One common operator family spanning endpoints, means and max."""
+        local = torch.as_tensor(local).float().clamp(0.0, 1.0)
+        global_value = torch.as_tensor(global_value).float().clamp(0.0, 1.0)
+        weight = float(global_weight)
+        if family == 'endpoint':
+            return global_value if weight >= 0.5 else local
+        if family == 'max':
+            return torch.maximum(local, global_value)
+        if family == 'power':
+            exponent = float(rho)
+            return (
+                (1.0 - weight) * local.pow(exponent)
+                + weight * global_value.pow(exponent)
+            ).clamp_min(0.0).pow(1.0 / exponent).clamp(0.0, 1.0)
+        if family == 'logit':
+            epsilon = 1e-6
+            local_safe = local.clamp(epsilon, 1.0 - epsilon)
+            global_safe = global_value.clamp(epsilon, 1.0 - epsilon)
+            local_logit = torch.log(local_safe / (1.0 - local_safe))
+            global_logit = torch.log(global_safe / (1.0 - global_safe))
+            return torch.sigmoid(
+                (1.0 - weight) * local_logit + weight * global_logit)
+        raise ValueError(f'Unknown Joint Role--View family: {family!r}.')
+
+    def _jrv_predict_image(self, image, image_path):
+        """Build the shared Local/Global evidence bank for joint profiling."""
+        candidates = self._jrv_config['role_candidates']
+        global_source = self._glv_global_source(image)
+        unit_values = self._jrv_accumulate_visual_units(
+            image, image_path, need_context=(global_source == 'aligned_context'),
+            candidates=candidates)
+        fine_matches = self._rvf_fine_matches_official(image)
+        if fine_matches:
+            official_query = unit_values['local_query']
+            official = unit_values['local_anchor']
+            official_roles = unit_values['local_roles']
+        else:
+            official_query, official, official_roles = (
+                self._jrv_accumulate_official_units(image, candidates))
+
+        if global_source == 'full_image':
+            global_anchor = official
+            global_roles = official_roles
+        else:
+            global_anchor = unit_values['context_anchor']
+            global_roles = unit_values['context_roles']
+        bundle = dict(
+            joint_role_view=True,
+            anchor=dict(
+                local=unit_values['local_anchor'],
+                global_value=global_anchor),
+            roles=OrderedDict(
+                (candidate['id'], dict(
+                    local=unit_values['local_roles'][candidate['id']],
+                    global_value=global_roles[candidate['id']]))
+                for candidate in candidates),
+        )
+        reference_endpoint = 'local' if fine_matches else 'global'
+        reference_anchor = bundle['anchor'][
+            'local' if reference_endpoint == 'local' else 'global_value']
+        identity_error = float((reference_anchor - official).abs().max())
+        if (self.role_prompt_tta_strict_integrity
+                and identity_error > self.role_prompt_tta_integrity_tolerance):
+            raise RuntimeError(
+                f'Joint Role--View reference identity failed: {identity_error}.')
+        metadata = dict(
+            schema_version=JRV_SCHEMA_VERSION,
+            protocol=JRV_PROTOCOL,
+            global_source=global_source,
+            reference_endpoint=reference_endpoint,
+            operator_specs=[dict(
+                name=name, family=family, global_weight=float(weight),
+                rho=(None if rho is None else float(rho)))
+                for name, family, weight, rho in JRV_OPERATOR_SPECS],
+            role_candidates=[dict(
+                id=value['id'], slots=list(value['slots']),
+                admission=value['admission'],
+                source_miou=float(value['source_miou']))
+                for value in candidates],
+            anchor_candidate=self._jrv_config['anchor_candidate'],
+            current_role_candidate=self._jrv_config[
+                'current_role_candidate'],
+            prior_view_operator=self._jrv_config['prior_view_operator'],
+            local_size=int(self._rvf_config['fine_size']),
+            context_size=int(self._rvf_config['context_size']),
+            source_mode=self._rvf_config['source_mode'],
+            reference_identity_max_abs=identity_error,
+            native_prompt_parity_max_abs=float(
+                self._rpt_native_parity_max_abs or 0.0),
+            units=unit_values['units'],
+            unique_context_views=int(unit_values['unique_context_views']),
+        )
+        return official_query.to(self.device), bundle, metadata
+
     def _rvf_predict_image(self, image, image_path):
+        if self.role_prompt_tta_visual_field_mode == 'joint_role_view':
+            return self._jrv_predict_image(image, image_path)
         if self.role_prompt_tta_visual_field_mode == 'global_local':
             return self._glv_predict_image(image, image_path)
         if self.role_prompt_tta_visual_field_mode == 'multimodal_fusion':
@@ -815,6 +1120,9 @@ class RoleVisualFieldMixin:
 
     def _rvf_record_image(
             self, variants, metadata, data_sample, image_path):
+        if self.role_prompt_tta_visual_field_mode == 'joint_role_view':
+            return self._jrv_record_image(
+                variants, metadata, data_sample, image_path)
         if self.role_prompt_tta_visual_field_mode == 'global_local':
             return self._glv_record_image(
                 variants, metadata, data_sample, image_path)
@@ -860,6 +1168,148 @@ class RoleVisualFieldMixin:
             valid_pixels=int(valid.sum()),
             prob_thd=float(self.prob_thd),
             role_visual_field=dict(metadata, variants=rows),
+        )
+        self._rpt_write_stats(record)
+
+    @staticmethod
+    def _rvf_resize_variants(variants, output_shape):
+        """Resize flat experiment maps or the compact Joint endpoint bank."""
+        if not variants.get('joint_role_view', False):
+            return {
+                name: F.interpolate(
+                    value.unsqueeze(0), size=output_shape,
+                    mode='bilinear', align_corners=False).squeeze(0)
+                for name, value in variants.items()
+            }
+
+        def resize(value):
+            if tuple(value.shape[-2:]) == tuple(output_shape):
+                return value
+            return F.interpolate(
+                value.unsqueeze(0), size=output_shape,
+                mode='bilinear', align_corners=False).squeeze(0)
+
+        return dict(
+            joint_role_view=True,
+            anchor={
+                name: resize(value)
+                for name, value in variants['anchor'].items()
+            },
+            roles=OrderedDict(
+                (identifier, {
+                    name: resize(value) for name, value in endpoints.items()
+                })
+                for identifier, endpoints in variants['roles'].items()),
+        )
+
+    def _jrv_record_image(
+            self, bundle, metadata, data_sample, image_path):
+        """Evaluate all Joint profiles without retaining every fused score map."""
+        if not self.dump_role_prompt_tta_stats:
+            return
+        gt = data_sample.gt_sem_seg.data.squeeze().detach().long().cpu()
+        valid = gt != 255
+        reference_key = (
+            'local' if metadata['reference_endpoint'] == 'local'
+            else 'global_value')
+        official_score = bundle['anchor'][reference_key]
+        official_prediction = self._rpt_threshold(
+            official_score).to(torch.int16)
+
+        def transition(prediction):
+            changed = valid & (prediction != official_prediction)
+            improved = changed & (prediction == gt) & (
+                official_prediction != gt)
+            harmed = changed & (prediction != gt) & (
+                official_prediction == gt)
+            return dict(
+                changed_pixels=int(changed.sum()),
+                improved_pixels=int(improved.sum()),
+                harmed_pixels=int(harmed.sum()),
+                help_minus_harm=int(improved.sum()) - int(harmed.sum()),
+            )
+
+        rows = OrderedDict()
+        rows['jrv_official'] = dict(
+            candidate_id=metadata['anchor_candidate'],
+            slots=[0, 0, 0],
+            admission='native',
+            operator=metadata['reference_endpoint'],
+            operator_family='reference',
+            global_weight=(
+                0.0 if metadata['reference_endpoint'] == 'local' else 1.0),
+            rho=None,
+            confusion=self._rpt_confusion(
+                official_prediction, gt, valid),
+            **transition(official_prediction),
+        )
+        candidate_lookup = {
+            value['id']: value for value in metadata['role_candidates']}
+
+        def add_family(prefix, candidate, endpoints):
+            for operator in metadata['operator_specs']:
+                score = self._jrv_fuse_views(
+                    endpoints['local'], endpoints['global_value'],
+                    operator['family'], operator['global_weight'],
+                    operator['rho'])
+                prediction = self._rpt_threshold(score).to(torch.int16)
+                name = f'jrv_{prefix}__{operator["name"]}'
+                rows[name] = dict(
+                    candidate_id=candidate['id'],
+                    slots=list(candidate['slots']),
+                    admission=candidate['admission'],
+                    operator=operator['name'],
+                    operator_family=operator['family'],
+                    global_weight=float(operator['global_weight']),
+                    rho=operator['rho'],
+                    confusion=self._rpt_confusion(prediction, gt, valid),
+                    **transition(prediction),
+                )
+
+        anchor_id = metadata['anchor_candidate']
+        add_family('anchor', candidate_lookup[anchor_id], bundle['anchor'])
+        for identifier, endpoints in bundle['roles'].items():
+            if identifier == anchor_id:
+                continue
+            add_family(identifier, candidate_lookup[identifier], endpoints)
+
+        complementarity = OrderedDict()
+        endpoint_families = OrderedDict(anchor=bundle['anchor'])
+        endpoint_families.update(
+            (identifier, endpoints)
+            for identifier, endpoints in bundle['roles'].items()
+            if identifier != anchor_id)
+        for identifier, endpoints in endpoint_families.items():
+            local_prediction = self._rpt_threshold(
+                endpoints['local']).to(torch.int16)
+            global_prediction = self._rpt_threshold(
+                endpoints['global_value']).to(torch.int16)
+            local_correct = valid & (local_prediction == gt)
+            global_correct = valid & (global_prediction == gt)
+            local_only = local_correct & ~global_correct
+            global_only = global_correct & ~local_correct
+            oracle = local_prediction.clone()
+            oracle[global_only] = global_prediction[global_only]
+            complementarity[identifier] = dict(
+                local_only_correct_pixels=int(local_only.sum()),
+                global_only_correct_pixels=int(global_only.sum()),
+                disagreement_pixels=int((
+                    valid & (local_prediction != global_prediction)).sum()),
+                oracle_confusion=self._rpt_confusion(oracle, gt, valid),
+            )
+
+        record = dict(
+            schema_version=JRV_SCHEMA_VERSION,
+            rank=int(os.environ.get('RANK', 0)),
+            local_rank=int(os.environ.get('LOCAL_RANK', 0)),
+            dataset_name=self.role_prompt_tta_dataset_name,
+            img_path=image_path,
+            class_names=list(self.class_names),
+            valid_pixels=int(valid.sum()),
+            prob_thd=float(self.prob_thd),
+            joint_role_view=dict(
+                metadata, variants=rows,
+                complementarity=complementarity),
         )
         self._rpt_write_stats(record)
 

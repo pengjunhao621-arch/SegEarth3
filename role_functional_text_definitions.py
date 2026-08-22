@@ -51,6 +51,28 @@ GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES = (
     'glv_text_max',
 )
 
+JOINT_ROLE_VIEW_PROTOCOL = 'joint_role_view_profile_v1'
+JOINT_ROLE_VIEW_SCHEMA_VERSION = 1
+JOINT_ROLE_VIEW_OPERATOR_SPECS = (
+    ('local', 'endpoint', 0.0, None),
+    ('global', 'endpoint', 1.0, None),
+    ('linear_g025', 'power', 0.25, 1.0),
+    ('linear_g050', 'power', 0.50, 1.0),
+    ('linear_g075', 'power', 0.75, 1.0),
+    ('power2_g025', 'power', 0.25, 2.0),
+    ('power2_g050', 'power', 0.50, 2.0),
+    ('power2_g075', 'power', 0.75, 2.0),
+    ('power4_g025', 'power', 0.25, 4.0),
+    ('power4_g050', 'power', 0.50, 4.0),
+    ('power4_g075', 'power', 0.75, 4.0),
+    ('logit_g025', 'logit', 0.25, None),
+    ('logit_g050', 'logit', 0.50, None),
+    ('logit_g075', 'logit', 0.75, None),
+    ('max', 'max', 0.50, None),
+)
+JOINT_ROLE_VIEW_OPERATOR_NAMES = tuple(
+    value[0] for value in JOINT_ROLE_VIEW_OPERATOR_SPECS)
+
 ROLE_MULTIMODAL_FUSION_PROTOCOL = 'role_multimodal_fusion_v1'
 ROLE_MULTIMODAL_FUSION_SCHEMA_VERSION = 1
 ROLE_MULTIMODAL_FUSION_BLEND = 0.5
@@ -312,6 +334,66 @@ def load_role_text_selection_registry(path, dataset):
     prompt_bank = record.get('prompt_bank')
     if not isinstance(prompt_bank, str) or not prompt_bank.strip():
         raise ValueError(f'{key}.prompt_bank must be a non-empty path.')
+    record['_dataset'] = key
+    record['_path'] = path
+    return record
+
+
+def load_joint_role_view_registry(path, dataset):
+    """Load a compact, previously validated Role candidate set."""
+    with open(path, encoding='utf-8') as handle:
+        payload = json.load(handle)
+    if (int(payload.get('schema_version', -1))
+            != JOINT_ROLE_VIEW_SCHEMA_VERSION
+            or payload.get('protocol') != JOINT_ROLE_VIEW_PROTOCOL):
+        raise ValueError(
+            f'{path} is not a {JOINT_ROLE_VIEW_PROTOCOL} registry.')
+    key = str(dataset).lower()
+    record = dict(payload.get('datasets', {}).get(key, {}))
+    if not record:
+        raise ValueError(f'{path} has no joint profile entry for {key!r}.')
+    candidates = record.get('role_candidates')
+    if not isinstance(candidates, list) or len(candidates) < 2:
+        raise ValueError(f'{key}: role_candidates must contain at least two rows.')
+    limits = (2, 3, 2)
+    normalized, identifiers = [], set()
+    for value in candidates:
+        candidate = dict(value)
+        identifier = str(candidate.get('id', '')).strip()
+        slots = candidate.get('slots')
+        admission = str(candidate.get('admission', 'native'))
+        if not identifier or identifier in identifiers:
+            raise ValueError(f'{key}: role candidate IDs must be unique.')
+        if (not isinstance(slots, list) or len(slots) != 3
+                or any(not isinstance(slot, int) for slot in slots)):
+            raise ValueError(f'{key}.{identifier}: slots must be [P, S, I].')
+        slots = tuple(int(slot) for slot in slots)
+        if any(slot < 0 or slot > limit
+               for slot, limit in zip(slots, limits)):
+            raise ValueError(f'{key}.{identifier}: slots out of range: {slots}.')
+        if admission not in ('native', 'anchor_admission'):
+            raise ValueError(f'{key}.{identifier}: invalid admission mode.')
+        candidate['id'] = identifier
+        candidate['slots'] = slots
+        candidate['admission'] = admission
+        candidate['source_miou'] = float(candidate['source_miou'])
+        normalized.append(candidate)
+        identifiers.add(identifier)
+    anchor = str(record.get('anchor_candidate', ''))
+    current = str(record.get('current_role_candidate', ''))
+    prior_view = str(record.get('prior_view_operator', ''))
+    if anchor not in identifiers or current not in identifiers:
+        raise ValueError(f'{key}: anchor/current candidate is not registered.')
+    anchor_row = next(value for value in normalized if value['id'] == anchor)
+    if anchor_row['slots'] != (0, 0, 0):
+        raise ValueError(f'{key}: anchor candidate must use P0+S0+I0.')
+    if prior_view not in JOINT_ROLE_VIEW_OPERATOR_NAMES:
+        raise ValueError(f'{key}: unknown prior_view_operator={prior_view!r}.')
+    record['role_candidates'] = tuple(normalized)
+    record['_candidate_ids'] = tuple(value['id'] for value in normalized)
+    record['anchor_candidate'] = anchor
+    record['current_role_candidate'] = current
+    record['prior_view_operator'] = prior_view
     record['_dataset'] = key
     record['_path'] = path
     return record
