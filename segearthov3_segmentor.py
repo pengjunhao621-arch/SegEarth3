@@ -71,6 +71,8 @@ class SegEarthOV3Segmentation(
             role_prompt_tta_visual_field_registry=None,
             role_prompt_tta_visual_field_mode='role_allocations',
             role_prompt_tta_joint_profile_registry=None,
+            role_prompt_tta_joint_final_registry=None,
+            role_prompt_tta_final_profile='audit',
             role_prompt_tta_selection_registry=None,
             **kwargs):
         super().__init__()
@@ -164,6 +166,9 @@ class SegEarthOV3Segmentation(
                 role_prompt_tta_visual_field_mode),
             role_prompt_tta_joint_profile_registry=(
                 role_prompt_tta_joint_profile_registry),
+            role_prompt_tta_joint_final_registry=(
+                role_prompt_tta_joint_final_registry),
+            role_prompt_tta_final_profile=role_prompt_tta_final_profile,
         )
 
     def _get_instance_score(self, state, instance_index):
@@ -207,6 +212,11 @@ class SegEarthOV3Segmentation(
 
         with torch.no_grad(), self._rpt_autocast_context():
             state = self.processor.set_image(image)
+            if isinstance(getattr(
+                    self, '_inference_profile_cost', None), dict):
+                self._inference_profile_cost['image_encoder_calls'] += 1
+                self._inference_profile_cost['grounding_calls'] += int(
+                    len(self.query_words))
             for query_index, query_word in enumerate(self.query_words):
                 self.processor.reset_all_prompts(state)
                 self.processor.set_text_prompt(query_word, state)
@@ -568,6 +578,13 @@ class SegEarthOV3Segmentation(
             meta = data_sample.metainfo
             image_path = meta.get('img_path')
             image = Image.open(image_path).convert('RGB')
+            self._inference_profile_cost = dict(
+                image_encoder_calls=0,
+                grounding_calls=0,
+                candidate_count=0,
+                profile_count=1,
+                compiled=True,
+            )
             original_shape = tuple(meta['ori_shape'][:2])
             if self._uses_role_visual_field():
                 query_logits, variants, metadata = self._rvf_predict_image(
@@ -580,6 +597,9 @@ class SegEarthOV3Segmentation(
                         mode='bilinear', align_corners=False).squeeze(0)
                     variants = self._rvf_resize_variants(
                         variants, original_shape)
+                if variants.get('joint_role_view_final', False):
+                    class_logits = variants['profiles'][
+                        variants['selected_profile']].to(self.device)
                 prediction = class_logits.argmax(dim=0)
                 prediction[class_logits.max(dim=0)[0] < self.prob_thd] = (
                     self.bg_idx)

@@ -10,6 +10,7 @@ import segearthov3_segmentor
 import segearthov3_change_detector
 import custom_datasets
 import custom_transforms
+import inference_benchmark_hook  # noqa: F401 -- registers optional hook
 
 
 def parse_args():
@@ -35,6 +36,10 @@ def parse_args():
         type=str,
         default='results.xlsx',
         help='Spreadsheet path for this job. Use an empty string to disable.')
+    parser.add_argument('--benchmark-jsonl', type=str, default=None)
+    parser.add_argument('--benchmark-profile', type=str, default='baseline')
+    parser.add_argument('--benchmark-dataset', type=str, default='')
+    parser.add_argument('--benchmark-warmup', type=int, default=2)
     parser.add_argument(
         '--cfg-options',
         nargs='+',
@@ -132,6 +137,16 @@ def main():
         cfg.test_evaluator['keep_results'] = True
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
+    if args.benchmark_jsonl:
+        custom_hooks = list(cfg.get('custom_hooks', []))
+        custom_hooks.append(dict(
+            type='InferenceBenchmarkHook',
+            output_path=args.benchmark_jsonl,
+            profile=args.benchmark_profile,
+            dataset=args.benchmark_dataset,
+            warmup=args.benchmark_warmup,
+        ))
+        cfg.custom_hooks = custom_hooks
     cfg.work_dir = (
         args.work_dir
         if args.work_dir

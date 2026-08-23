@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "protocol": "joint_role_view_final_v1",
+  "source_experiment": "joint_role_view_profile_v1_full_4b5363f",
+  "note": "Frozen validation-derived profiles. Audit evaluates residual/direct, matched admission, Role-only, View-only, Full Joint, and sparse Fast Joint from one shared evidence bank. Deploy mode compiles only one requested profile.",
+  "datasets": {
+    "loveda": {
+      "primary_profile": "joint_residual",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native"},
+        {"id": "full_native", "slots": [1, 1, 0], "admission": "native"},
+        {"id": "full_anchor_admission", "slots": [1, 1, 0], "admission": "anchor_admission"},
+        {"id": "fast", "slots": [0, 1, 0], "admission": "native"}
+      ],
+      "profiles": {
+        "role_only_residual": {"candidate": "full_native", "update": "residual", "operator": "reference"},
+        "role_only_direct": {"candidate": "full_native", "update": "direct", "operator": "reference"},
+        "view_only": {"candidate": "anchor", "update": "residual", "operator": "power2_g075"},
+        "joint_residual": {"candidate": "full_native", "update": "residual", "operator": "max"},
+        "joint_direct": {"candidate": "full_native", "update": "direct", "operator": "max"},
+        "fast_joint_residual": {"candidate": "fast", "update": "residual", "operator": "power2_g075"},
+        "fast_joint_direct": {"candidate": "fast", "update": "direct", "operator": "power2_g075"},
+        "full_native_admission": {"candidate": "full_native", "update": "residual", "operator": "max"},
+        "full_anchor_admission": {"candidate": "full_anchor_admission", "update": "residual", "operator": "max"}
+      }
+    },
+    "openearthmap": {
+      "primary_profile": "joint_residual",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native"},
+        {"id": "full_native", "slots": [0, 3, 2], "admission": "native"},
+        {"id": "full_anchor_admission", "slots": [0, 3, 2], "admission": "anchor_admission"},
+        {"id": "fast", "slots": [0, 0, 2], "admission": "native"}
+      ],
+      "profiles": {
+        "role_only_residual": {"candidate": "full_native", "update": "residual", "operator": "reference"},
+        "role_only_direct": {"candidate": "full_native", "update": "direct", "operator": "reference"},
+        "view_only": {"candidate": "anchor", "update": "residual", "operator": "max"},
+        "joint_residual": {"candidate": "full_native", "update": "residual", "operator": "linear_g050"},
+        "joint_direct": {"candidate": "full_native", "update": "direct", "operator": "linear_g050"},
+        "fast_joint_residual": {"candidate": "fast", "update": "residual", "operator": "max"},
+        "fast_joint_direct": {"candidate": "fast", "update": "direct", "operator": "max"},
+        "full_native_admission": {"candidate": "full_native", "update": "residual", "operator": "linear_g050"},
+        "full_anchor_admission": {"candidate": "full_anchor_admission", "update": "residual", "operator": "linear_g050"}
+      }
+    },
+    "potsdam": {
+      "primary_profile": "joint_residual",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native"},
+        {"id": "full_anchor_admission", "slots": [1, 2, 0], "admission": "anchor_admission"},
+        {"id": "full_native", "slots": [1, 2, 0], "admission": "native"},
+        {"id": "fast", "slots": [1, 0, 0], "admission": "native"}
+      ],
+      "profiles": {
+        "role_only_residual": {"candidate": "full_anchor_admission", "update": "residual", "operator": "reference"},
+        "role_only_direct": {"candidate": "full_anchor_admission", "update": "direct", "operator": "reference"},
+        "view_only": {"candidate": "anchor", "update": "residual", "operator": "linear_g075"},
+        "joint_residual": {"candidate": "full_anchor_admission", "update": "residual", "operator": "linear_g075"},
+        "joint_direct": {"candidate": "full_anchor_admission", "update": "direct", "operator": "linear_g075"},
+        "fast_joint_residual": {"candidate": "fast", "update": "residual", "operator": "linear_g075"},
+        "fast_joint_direct": {"candidate": "fast", "update": "direct", "operator": "linear_g075"},
+        "full_native_admission": {"candidate": "full_native", "update": "residual", "operator": "linear_g075"},
+        "full_anchor_admission": {"candidate": "full_anchor_admission", "update": "residual", "operator": "linear_g075"}
+      }
+    },
+    "udd5": {
+      "primary_profile": "joint_residual",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native"},
+        {"id": "role_only_anchor_admission", "slots": [1, 2, 2], "admission": "anchor_admission"},
+        {"id": "role_only_native", "slots": [1, 2, 2], "admission": "native"},
+        {"id": "full_native", "slots": [2, 2, 1], "admission": "native"},
+        {"id": "full_anchor_admission", "slots": [2, 2, 1], "admission": "anchor_admission"},
+        {"id": "fast", "slots": [2, 2, 0], "admission": "native"}
+      ],
+      "profiles": {
+        "role_only_residual": {"candidate": "role_only_anchor_admission", "update": "residual", "operator": "reference"},
+        "role_only_direct": {"candidate": "role_only_anchor_admission", "update": "direct", "operator": "reference"},
+        "view_only": {"candidate": "anchor", "update": "residual", "operator": "logit_g075"},
+        "joint_residual": {"candidate": "full_native", "update": "residual", "operator": "logit_g075"},
+        "joint_direct": {"candidate": "full_native", "update": "direct", "operator": "logit_g075"},
+        "fast_joint_residual": {"candidate": "fast", "update": "residual", "operator": "logit_g075"},
+        "fast_joint_direct": {"candidate": "fast", "update": "direct", "operator": "logit_g075"},
+        "full_native_admission": {"candidate": "full_native", "update": "residual", "operator": "logit_g075"},
+        "full_anchor_admission": {"candidate": "full_anchor_admission", "update": "residual", "operator": "logit_g075"},
+        "current_native_admission": {"candidate": "role_only_native", "update": "residual", "operator": "logit_g075"},
+        "current_anchor_admission": {"candidate": "role_only_anchor_admission", "update": "residual", "operator": "logit_g075"}
+      }
+    },
+    "vaihingen": {
+      "primary_profile": "joint_residual",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native"},
+        {"id": "role_only", "slots": [0, 3, 1], "admission": "native"},
+        {"id": "full_native", "slots": [0, 3, 2], "admission": "native"},
+        {"id": "full_anchor_admission", "slots": [0, 3, 2], "admission": "anchor_admission"}
+      ],
+      "profiles": {
+        "role_only_residual": {"candidate": "role_only", "update": "residual", "operator": "reference"},
+        "role_only_direct": {"candidate": "role_only", "update": "direct", "operator": "reference"},
+        "view_only": {"candidate": "anchor", "update": "residual", "operator": "logit_g075"},
+        "joint_residual": {"candidate": "full_native", "update": "residual", "operator": "max"},
+        "joint_direct": {"candidate": "full_native", "update": "direct", "operator": "max"},
+        "fast_joint_residual": {"candidate": "full_native", "update": "residual", "operator": "max"},
+        "fast_joint_direct": {"candidate": "full_native", "update": "direct", "operator": "max"},
+        "full_native_admission": {"candidate": "full_native", "update": "residual", "operator": "max"},
+        "full_anchor_admission": {"candidate": "full_anchor_admission", "update": "residual", "operator": "max"}
+      }
+    },
+    "vdd": {
+      "primary_profile": "joint_residual",
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native"},
+        {"id": "role_only_anchor_admission", "slots": [2, 1, 1], "admission": "anchor_admission"},
+        {"id": "role_only_native", "slots": [2, 1, 1], "admission": "native"},
+        {"id": "full_native", "slots": [2, 1, 0], "admission": "native"},
+        {"id": "full_anchor_admission", "slots": [2, 1, 0], "admission": "anchor_admission"}
+      ],
+      "profiles": {
+        "role_only_residual": {"candidate": "role_only_anchor_admission", "update": "residual", "operator": "reference"},
+        "role_only_direct": {"candidate": "role_only_anchor_admission", "update": "direct", "operator": "reference"},
+        "view_only": {"candidate": "anchor", "update": "residual", "operator": "logit_g075"},
+        "joint_residual": {"candidate": "full_native", "update": "residual", "operator": "logit_g050"},
+        "joint_direct": {"candidate": "full_native", "update": "direct", "operator": "logit_g050"},
+        "fast_joint_residual": {"candidate": "full_native", "update": "residual", "operator": "logit_g050"},
+        "fast_joint_direct": {"candidate": "full_native", "update": "direct", "operator": "logit_g050"},
+        "full_native_admission": {"candidate": "full_native", "update": "residual", "operator": "logit_g050"},
+        "full_anchor_admission": {"candidate": "full_anchor_admission", "update": "residual", "operator": "logit_g050"},
+        "current_native_admission": {"candidate": "role_only_native", "update": "residual", "operator": "logit_g050"},
+        "current_anchor_admission": {"candidate": "role_only_anchor_admission", "update": "residual", "operator": "logit_g050"}
+      }
+    }
+  }
+}

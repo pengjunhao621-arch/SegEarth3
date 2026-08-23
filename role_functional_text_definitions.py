@@ -73,6 +73,10 @@ JOINT_ROLE_VIEW_OPERATOR_SPECS = (
 JOINT_ROLE_VIEW_OPERATOR_NAMES = tuple(
     value[0] for value in JOINT_ROLE_VIEW_OPERATOR_SPECS)
 
+JOINT_ROLE_VIEW_FINAL_PROTOCOL = 'joint_role_view_final_v1'
+JOINT_ROLE_VIEW_FINAL_SCHEMA_VERSION = 1
+JOINT_ROLE_VIEW_FINAL_UPDATES = ('residual', 'direct')
+
 ROLE_MULTIMODAL_FUSION_PROTOCOL = 'role_multimodal_fusion_v1'
 ROLE_MULTIMODAL_FUSION_SCHEMA_VERSION = 1
 ROLE_MULTIMODAL_FUSION_BLEND = 0.5
@@ -398,6 +402,85 @@ def load_joint_role_view_registry(path, dataset):
     record['prior_view_miou'] = prior_view_miou
     record['_dataset'] = key
     record['_path'] = path
+    return record
+
+
+def load_joint_role_view_final_registry(path, dataset):
+    """Load one frozen, deployable Role--View experiment profile set."""
+    with open(path, encoding='utf-8') as handle:
+        payload = json.load(handle)
+    if (int(payload.get('schema_version', -1))
+            != JOINT_ROLE_VIEW_FINAL_SCHEMA_VERSION
+            or payload.get('protocol') != JOINT_ROLE_VIEW_FINAL_PROTOCOL):
+        raise ValueError(
+            f'{path} is not a {JOINT_ROLE_VIEW_FINAL_PROTOCOL} registry.')
+    key = str(dataset).lower()
+    record = dict(payload.get('datasets', {}).get(key, {}))
+    if not record:
+        raise ValueError(f'{path} has no final profile entry for {key!r}.')
+
+    limits = (2, 3, 2)
+    candidates = []
+    identifiers = set()
+    for value in record.get('role_candidates', []):
+        candidate = dict(value)
+        identifier = str(candidate.get('id', '')).strip()
+        slots = candidate.get('slots')
+        admission = str(candidate.get('admission', 'native'))
+        if not identifier or identifier in identifiers:
+            raise ValueError(f'{key}: final candidate IDs must be unique.')
+        if (not isinstance(slots, list) or len(slots) != 3
+                or any(not isinstance(slot, int) for slot in slots)):
+            raise ValueError(f'{key}.{identifier}: slots must be [P, S, I].')
+        slots = tuple(int(slot) for slot in slots)
+        if any(slot < 0 or slot > limit
+               for slot, limit in zip(slots, limits)):
+            raise ValueError(f'{key}.{identifier}: slots out of range.')
+        if admission not in ('native', 'anchor_admission'):
+            raise ValueError(f'{key}.{identifier}: invalid admission mode.')
+        candidate.update(slots=slots, admission=admission)
+        candidates.append(candidate)
+        identifiers.add(identifier)
+    if 'anchor' not in identifiers:
+        raise ValueError(f'{key}: final registry requires an anchor candidate.')
+    anchor = next(value for value in candidates if value['id'] == 'anchor')
+    if anchor['slots'] != (0, 0, 0):
+        raise ValueError(f'{key}: anchor candidate must use P0+S0+I0.')
+
+    profiles = {}
+    for name, value in record.get('profiles', {}).items():
+        profile = dict(value)
+        candidate = str(profile.get('candidate', '')).strip()
+        update = str(profile.get('update', 'residual'))
+        operator = str(profile.get('operator', 'reference'))
+        if candidate not in identifiers:
+            raise ValueError(f'{key}.{name}: unknown candidate {candidate!r}.')
+        if update not in JOINT_ROLE_VIEW_FINAL_UPDATES:
+            raise ValueError(f'{key}.{name}: invalid update {update!r}.')
+        if (operator != 'reference'
+                and operator not in JOINT_ROLE_VIEW_OPERATOR_NAMES):
+            raise ValueError(f'{key}.{name}: unknown operator {operator!r}.')
+        profile.update(
+            candidate=candidate, update=update, operator=operator)
+        profiles[str(name)] = profile
+    required = {
+        'role_only_residual', 'view_only', 'joint_residual',
+        'joint_direct', 'fast_joint_residual', 'fast_joint_direct',
+    }
+    missing = sorted(required - set(profiles))
+    if missing:
+        raise ValueError(f'{key}: missing final profiles: {missing}.')
+    primary = str(record.get('primary_profile', 'joint_residual'))
+    if primary not in profiles:
+        raise ValueError(f'{key}: primary_profile is not registered.')
+    record.update(
+        role_candidates=tuple(candidates),
+        profiles=profiles,
+        primary_profile=primary,
+        _candidate_ids=tuple(value['id'] for value in candidates),
+        _dataset=key,
+        _path=path,
+    )
     return record
 
 SENSITIVITY_VARIANTS = tuple(
