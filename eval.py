@@ -1,6 +1,7 @@
 import os
 import os.path as osp
 import argparse
+import json
 import openpyxl
 import torch
 from mmengine.runner import Runner
@@ -35,7 +36,8 @@ def parse_args():
         '--result-file',
         type=str,
         default='results.xlsx',
-        help='Spreadsheet path for this job. Use an empty string to disable.')
+        help='Path to an .xlsx or .json result file. Use an empty string to '
+        'disable.')
     parser.add_argument('--benchmark-jsonl', type=str, default=None)
     parser.add_argument('--benchmark-profile', type=str, default='baseline')
     parser.add_argument('--benchmark-dataset', type=str, default='')
@@ -67,6 +69,26 @@ def parse_args():
 
 
 def append_experiment_result(file_path, experiment_data):
+    suffix = osp.splitext(file_path)[1].lower()
+    if suffix == '.json':
+        records = []
+        if osp.exists(file_path):
+            with open(file_path, 'r') as file:
+                records = json.load(file)
+            if isinstance(records, dict):
+                records = [records]
+            if not isinstance(records, list):
+                raise ValueError(
+                    f'Expected a JSON list or object in {file_path}.')
+        records.extend(experiment_data)
+        with open(file_path, 'w') as file:
+            json.dump(records, file, indent=2)
+        return
+    if suffix not in ('.xlsx', '.xlsm', '.xltx', '.xltm'):
+        raise ValueError(
+            '--result-file must use .json or an openpyxl-supported Excel '
+            f'extension, got: {file_path}')
+
     try:
         workbook = openpyxl.load_workbook(file_path)
     except FileNotFoundError:
