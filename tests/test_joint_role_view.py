@@ -113,10 +113,10 @@ class JointRoleViewTest(unittest.TestCase):
         profiles = {
             value['profile'] for value in result['profiles']}
         self.assertEqual(profiles, {
-            'official', 'role_only', 'view_only_best',
+            'official', 'role_only', 'role_only_best', 'view_only_best',
             'sequential_role_view', 'current_role_best_view',
             'joint_role_view_best'})
-        self.assertEqual(len(result['profile_macros']), 6)
+        self.assertEqual(len(result['profile_macros']), 7)
         self.assertEqual(len(result['reproduction']), 1)
         self.assertAlmostEqual(
             result['reproduction'][0]['reference_identity_max_abs'], 0.0)

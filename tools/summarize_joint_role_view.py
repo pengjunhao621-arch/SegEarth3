@@ -97,7 +97,7 @@ def _variant_name(candidate, operator, anchor):
     return f'jrv_{prefix}__{operator}'
 
 
-def _profile_row(dataset, label, name, metrics, rows, official, role_only):
+def _profile_row(dataset, label, name, metrics, rows, official, role_reference):
     source = rows[name]
     metric = metrics[name]
     return dict(
@@ -114,7 +114,7 @@ def _profile_row(dataset, label, name, metrics, rows, official, role_only):
         miou=metric['miou'],
         aacc=metric['aacc'],
         delta_to_official=metric['miou'] - official['miou'],
-        delta_to_role_only=metric['miou'] - role_only['miou'],
+        delta_to_role_only=metric['miou'] - role_reference['miou'],
     )
 
 
@@ -181,8 +181,9 @@ def summarize(records):
         candidates = {
             candidate['id']: candidate
             for candidate in contract['role_candidates']}
-        expected_role_miou = float(candidates[current]['source_miou'])
+        expected_role_miou = candidates[current]['source_miou']
         measured_sequential_miou = metrics[sequential_name]['miou']
+        expected_sequential_miou = contract['prior_view_miou']
         reproduction_rows.append(dict(
             dataset=dataset,
             current_role_candidate=current,
@@ -190,12 +191,14 @@ def summarize(records):
             expected_role_only_miou=expected_role_miou,
             measured_role_only_miou=role_only['miou'],
             role_only_reproduction_delta=(
-                role_only['miou'] - expected_role_miou),
+                None if expected_role_miou is None
+                else role_only['miou'] - expected_role_miou),
             prior_view_operator=contract['prior_view_operator'],
-            expected_sequential_miou=contract['prior_view_miou'],
+            expected_sequential_miou=expected_sequential_miou,
             measured_sequential_miou=measured_sequential_miou,
             sequential_reproduction_delta=(
-                measured_sequential_miou - contract['prior_view_miou']),
+                None if expected_sequential_miou is None
+                else measured_sequential_miou - expected_sequential_miou),
             reference_identity_max_abs=max(
                 float(value['joint_role_view'][
                     'reference_identity_max_abs'])
@@ -212,6 +215,12 @@ def summarize(records):
         current_names = [
             _variant_name(current, operator, anchor)
             for operator in JOINT_ROLE_VIEW_OPERATOR_NAMES]
+        role_names = [
+            _variant_name(candidate['id'], endpoint, anchor)
+            for candidate in contract['role_candidates']
+            if candidate['id'] != anchor]
+        role_best_name = max(role_names, key=lambda name: metrics[name]['miou'])
+        role_reference = metrics[role_best_name]
         joint_names = [
             name for name in variant_names
             if name != official_name
@@ -223,6 +232,7 @@ def summarize(records):
         selected = (
             ('official', official_name),
             ('role_only', role_only_name),
+            ('role_only_best', role_best_name),
             ('view_only_best', view_only_name),
             ('sequential_role_view', sequential_name),
             ('current_role_best_view', current_best_view_name),
@@ -231,7 +241,7 @@ def summarize(records):
         for label, name in selected:
             profile_rows.append(_profile_row(
                 dataset, label, name, metrics, row_metadata,
-                official, role_only))
+                official, role_reference))
             for class_index, class_name in enumerate(
                     values[0]['class_names']):
                 class_rows.append(dict(
@@ -261,7 +271,7 @@ def summarize(records):
                 miou=metric['miou'],
                 aacc=metric['aacc'],
                 delta_to_official=metric['miou'] - official['miou'],
-                delta_to_role_only=metric['miou'] - role_only['miou'],
+                delta_to_role_only=metric['miou'] - role_reference['miou'],
                 images=len(values),
                 changed_pixels=counters[name]['changed_pixels'],
                 improved_pixels=counters[name]['improved_pixels'],
@@ -328,6 +338,7 @@ def summarize(records):
             endpoint=endpoint,
             official=official_name,
             role_only=role_only_name,
+            role_best=role_best_name,
             sequential=sequential_name,
             current_best_view=current_best_view_name,
             joint=joint_name,
@@ -345,7 +356,7 @@ def summarize(records):
             current_name = _variant_name(
                 payload['current'], operator, payload['anchor'])
             current_value = metrics[current_name]['miou']
-            role_reference = metrics[payload['role_only']]['miou']
+            role_reference = metrics[payload['role_best']]['miou']
             current_values.append(current_value)
             positive_current += int(current_value > role_reference)
             choices = [
@@ -401,7 +412,7 @@ def summarize(records):
 
 
 def _fmt(value):
-    return f'{float(value):.3f}'
+    return 'n/a' if value is None else f'{float(value):.3f}'
 
 
 def write_report(path, result, missing, duplicates):
@@ -411,9 +422,9 @@ def write_report(path, result, missing, duplicates):
     lines = [
         '# Joint Role--View Profile v1', '',
         '## Core profile comparison', '',
-        '| Dataset | Official | Role only | View only | Sequential | '
+        '| Dataset | Official | Registered Role | Best Role | View only | Sequential | '
         'Current Role + best View | Joint best | Joint profile |',
-        '|---|---:|---:|---:|---:|---:|---:|---|',
+        '|---|---:|---:|---:|---:|---:|---:|---:|---|',
     ]
     for dataset in sorted(profiles):
         rows = profiles[dataset]
@@ -424,6 +435,7 @@ def write_report(path, result, missing, duplicates):
         lines.append(
             f"| {dataset} | {_fmt(rows['official']['miou'])} | "
             f"{_fmt(rows['role_only']['miou'])} | "
+            f"{_fmt(rows['role_only_best']['miou'])} | "
             f"{_fmt(rows['view_only_best']['miou'])} | "
             f"{_fmt(rows['sequential_role_view']['miou'])} | "
             f"{_fmt(rows['current_role_best_view']['miou'])} | "
@@ -480,8 +492,6 @@ def write_report(path, result, missing, duplicates):
 def main():
     args = parse_args()
     expected = tuple(str(value).lower() for value in args.expected_datasets)
-    if 'isaid' in expected:
-        raise ValueError('iSAID is excluded from project evaluation.')
     records, missing, duplicates = load_records(
         args.inputs, expected, args.allow_incomplete)
     result = summarize(records)

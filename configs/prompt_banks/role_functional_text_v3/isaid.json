@@ -1,0 +1,344 @@
+{
+  "schema_version": 1,
+  "protocol": "role_functional_text_screen_v1",
+  "dataset": "iSAID",
+  "generator": "Codex; frozen role-functional candidates generated before evaluation from dataset ontology and visual geometry",
+  "frozen_before_evaluation": true,
+  "candidate_semantics": {
+    "presence": [
+      "P1: canonical visual existence or equivalent noun phrase",
+      "P2: multiplicity/area-oriented concept existence"
+    ],
+    "semantic": [
+      "S1: complete dense extent or spatial continuity",
+      "S2: silhouette/surface or coherent region appearance",
+      "S3: dataset-view-specific geometry and visual structure"
+    ],
+    "instance": [
+      "I1: individual object or connected component",
+      "I2: separated/bounded complete object or region"
+    ]
+  },
+  "classes": [
+    {
+      "id": 0,
+      "name": "background",
+      "official_prompts": [
+        "background"
+      ],
+      "presence_candidates": [
+        "visible image background",
+        "non-target background area"
+      ],
+      "semantic_candidates": [
+        "remaining background pixels",
+        "continuous non-target image region",
+        "unlabeled overhead background surface"
+      ],
+      "instance_candidates": [
+        "connected background component",
+        "bounded non-target background region"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "ship",
+      "official_prompts": [
+        "ship"
+      ],
+      "presence_candidates": [
+        "water vessel",
+        "visible ships"
+      ],
+      "semantic_candidates": [
+        "complete elongated ship footprint",
+        "ship-shaped region on the water surface",
+        "overhead vessel body with bow and stern"
+      ],
+      "instance_candidates": [
+        "individual ship instance",
+        "separate complete vessel"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "store tank",
+      "official_prompts": [
+        "store tank"
+      ],
+      "presence_candidates": [
+        "storage tank",
+        "visible storage tanks"
+      ],
+      "semantic_candidates": [
+        "complete circular storage-tank footprint",
+        "round industrial tank roof region",
+        "overhead cylindrical storage tank"
+      ],
+      "instance_candidates": [
+        "individual storage tank",
+        "separate complete circular tank"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "baseball diamond",
+      "official_prompts": [
+        "baseball diamond"
+      ],
+      "presence_candidates": [
+        "baseball field diamond",
+        "visible baseball diamonds"
+      ],
+      "semantic_candidates": [
+        "complete baseball infield diamond",
+        "diamond-shaped baseball field surface",
+        "overhead baseball diamond with infield boundary"
+      ],
+      "instance_candidates": [
+        "individual baseball diamond",
+        "separate complete baseball field"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "tennis court",
+      "official_prompts": [
+        "tennis court"
+      ],
+      "presence_candidates": [
+        "tennis playing court",
+        "visible tennis courts"
+      ],
+      "semantic_candidates": [
+        "complete rectangular tennis-court surface",
+        "tennis court with line-marked playing area",
+        "overhead tennis court rectangle"
+      ],
+      "instance_candidates": [
+        "individual tennis court",
+        "separate complete tennis court"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "basketball court",
+      "official_prompts": [
+        "basketball court"
+      ],
+      "presence_candidates": [
+        "basketball playing court",
+        "visible basketball courts"
+      ],
+      "semantic_candidates": [
+        "complete rectangular basketball-court surface",
+        "basketball court with line-marked playing area",
+        "overhead basketball court rectangle"
+      ],
+      "instance_candidates": [
+        "individual basketball court",
+        "separate complete basketball court"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "ground track field",
+      "official_prompts": [
+        "ground track field"
+      ],
+      "presence_candidates": [
+        "athletic track field",
+        "visible running-track fields"
+      ],
+      "semantic_candidates": [
+        "complete oval athletic-track region",
+        "running track surrounding a central field",
+        "overhead track-and-field facility"
+      ],
+      "instance_candidates": [
+        "individual ground track field",
+        "separate complete athletic track"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "bridge",
+      "official_prompts": [
+        "bridge"
+      ],
+      "presence_candidates": [
+        "transport bridge",
+        "visible bridges"
+      ],
+      "semantic_candidates": [
+        "complete elongated bridge deck",
+        "bridge span crossing water or land",
+        "overhead connected bridge structure"
+      ],
+      "instance_candidates": [
+        "individual bridge",
+        "separate complete bridge span"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "large vehicle",
+      "official_prompts": [
+        "large vehicle"
+      ],
+      "presence_candidates": [
+        "large road vehicle",
+        "visible large vehicles"
+      ],
+      "semantic_candidates": [
+        "complete large-vehicle footprint",
+        "elongated large vehicle body from overhead",
+        "large truck or bus roof region"
+      ],
+      "instance_candidates": [
+        "individual large vehicle",
+        "separate complete large vehicle"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "small vehicle",
+      "official_prompts": [
+        "small vehicle"
+      ],
+      "presence_candidates": [
+        "small road vehicle",
+        "visible small vehicles"
+      ],
+      "semantic_candidates": [
+        "complete compact vehicle footprint",
+        "small rectangular vehicle body from overhead",
+        "compact car-like roof region"
+      ],
+      "instance_candidates": [
+        "individual small vehicle",
+        "separate complete small vehicle"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "helicopter",
+      "official_prompts": [
+        "helicopter"
+      ],
+      "presence_candidates": [
+        "rotary-wing aircraft",
+        "visible helicopters"
+      ],
+      "semantic_candidates": [
+        "complete helicopter footprint",
+        "helicopter body with rotor extent",
+        "overhead rotary-wing aircraft silhouette"
+      ],
+      "instance_candidates": [
+        "individual helicopter",
+        "separate complete helicopter"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "swimming pool",
+      "official_prompts": [
+        "swimming pool"
+      ],
+      "presence_candidates": [
+        "outdoor swimming pool",
+        "visible swimming pools"
+      ],
+      "semantic_candidates": [
+        "complete bounded swimming-pool surface",
+        "rectangular blue pool-water region",
+        "overhead outdoor pool footprint"
+      ],
+      "instance_candidates": [
+        "individual swimming pool",
+        "separate complete pool basin"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "roundabout",
+      "official_prompts": [
+        "roundabout"
+      ],
+      "presence_candidates": [
+        "road roundabout",
+        "visible roundabouts"
+      ],
+      "semantic_candidates": [
+        "complete circular road junction",
+        "ring-shaped traffic roundabout surface",
+        "overhead roundabout with central island"
+      ],
+      "instance_candidates": [
+        "individual roundabout",
+        "separate complete road roundabout"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "soccer ball field",
+      "official_prompts": [
+        "soccer ball field"
+      ],
+      "presence_candidates": [
+        "soccer playing field",
+        "visible soccer fields"
+      ],
+      "semantic_candidates": [
+        "complete rectangular soccer-field surface",
+        "soccer pitch with line-marked boundary",
+        "overhead grass football field"
+      ],
+      "instance_candidates": [
+        "individual soccer field",
+        "separate complete soccer pitch"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "plane",
+      "official_prompts": [
+        "plane"
+      ],
+      "presence_candidates": [
+        "fixed-wing aircraft",
+        "visible airplanes"
+      ],
+      "semantic_candidates": [
+        "complete airplane footprint",
+        "aircraft body with wings and tail",
+        "overhead fixed-wing aircraft silhouette"
+      ],
+      "instance_candidates": [
+        "individual airplane",
+        "separate complete aircraft"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "harbor",
+      "official_prompts": [
+        "harbor"
+      ],
+      "presence_candidates": [
+        "port harbor",
+        "visible harbor area"
+      ],
+      "semantic_candidates": [
+        "complete connected harbor region",
+        "port water and dock interface",
+        "overhead sheltered harbor basin"
+      ],
+      "instance_candidates": [
+        "connected harbor component",
+        "bounded complete port region"
+      ]
+    }
+  ]
+}

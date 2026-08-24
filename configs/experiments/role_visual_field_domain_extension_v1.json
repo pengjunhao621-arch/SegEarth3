@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "protocol": "role_visual_field_v1",
+  "note": "Dataset-aligned Local/Global discovery fields. Global is the official full-image observation; Local preserves finer object detail through non-overlapping crops.",
+  "datasets": {
+    "voc20": {
+      "source_mode": "image",
+      "fine_size": 384,
+      "context_size": 768,
+      "reference_endpoint": "global"
+    },
+    "cityscapes": {
+      "source_mode": "image",
+      "fine_size": 512,
+      "context_size": 1024,
+      "reference_endpoint": "global"
+    },
+    "isaid": {
+      "source_mode": "image",
+      "fine_size": 512,
+      "context_size": 896,
+      "reference_endpoint": "global"
+    }
+  }
+}

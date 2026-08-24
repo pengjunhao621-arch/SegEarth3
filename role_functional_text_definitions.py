@@ -160,7 +160,9 @@ def load_joint_role_view_registry(path, dataset):
         candidate['id'] = identifier
         candidate['slots'] = slots
         candidate['admission'] = admission
-        candidate['source_miou'] = float(candidate['source_miou'])
+        source_miou = candidate.get('source_miou')
+        candidate['source_miou'] = (
+            None if source_miou is None else float(source_miou))
         normalized.append(candidate)
         identifiers.add(identifier)
     anchor = str(record.get('anchor_candidate', ''))
@@ -173,7 +175,9 @@ def load_joint_role_view_registry(path, dataset):
         raise ValueError(f'{key}: anchor candidate must use P0+S0+I0.')
     if prior_view not in JOINT_ROLE_VIEW_OPERATOR_NAMES:
         raise ValueError(f'{key}: unknown prior_view_operator={prior_view!r}.')
-    prior_view_miou = float(record['prior_view_miou'])
+    prior_view_miou = record.get('prior_view_miou')
+    prior_view_miou = (
+        None if prior_view_miou is None else float(prior_view_miou))
     record['role_candidates'] = tuple(normalized)
     record['_candidate_ids'] = tuple(value['id'] for value in normalized)
     record['anchor_candidate'] = anchor

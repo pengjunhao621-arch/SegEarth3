@@ -48,6 +48,10 @@ def load_visual_field_registry(path, dataset):
         raise ValueError(f'{key}: context_size must exceed fine_size.')
     if record.get('source_mode') not in ('image', 'coordinate_tiles'):
         raise ValueError(f'{key}: invalid source_mode.')
+    reference_endpoint = str(record.get('reference_endpoint', 'auto'))
+    if reference_endpoint not in ('auto', 'local', 'global'):
+        raise ValueError(f'{key}: invalid reference_endpoint.')
+    record['reference_endpoint'] = reference_endpoint
     return record
 
 
@@ -498,6 +502,12 @@ class RoleVisualFieldMixin:
             return 'full_image'
         return 'aligned_context'
 
+    def _jrv_reference_endpoint(self, image):
+        configured = self._rvf_config.get('reference_endpoint', 'auto')
+        if configured in ('local', 'global'):
+            return configured
+        return 'local' if self._rvf_fine_matches_official(image) else 'global'
+
     def _jrv_ground_target(
             self, view, roi, candidates, include_direct=False,
             include_residual=True):
@@ -896,7 +906,7 @@ class RoleVisualFieldMixin:
                     local=unit_values['local_direct'][value['id']],
                     global_value=global_direct[value['id']]))
                 for value in candidates) if include_direct else OrderedDict()
-            reference_endpoint = 'local' if fine_matches else 'global'
+            reference_endpoint = self._jrv_reference_endpoint(image)
             reference = anchor_endpoints[
                 'local' if reference_endpoint == 'local' else 'global_value']
             identity_error = float((reference - official).abs().max())
@@ -997,7 +1007,7 @@ class RoleVisualFieldMixin:
                     global_value=global_roles[candidate['id']]))
                 for candidate in candidates),
         )
-        reference_endpoint = 'local' if fine_matches else 'global'
+        reference_endpoint = self._jrv_reference_endpoint(image)
         reference_anchor = bundle['anchor'][
             'local' if reference_endpoint == 'local' else 'global_value']
         identity_error = float((reference_anchor - official).abs().max())
@@ -1017,13 +1027,13 @@ class RoleVisualFieldMixin:
             role_candidates=[dict(
                 id=value['id'], slots=list(value['slots']),
                 admission=value['admission'],
-                source_miou=float(value['source_miou']))
+                source_miou=value['source_miou'])
                 for value in candidates],
             anchor_candidate=self._jrv_config['anchor_candidate'],
             current_role_candidate=self._jrv_config[
                 'current_role_candidate'],
             prior_view_operator=self._jrv_config['prior_view_operator'],
-            prior_view_miou=float(self._jrv_config['prior_view_miou']),
+            prior_view_miou=self._jrv_config['prior_view_miou'],
             local_size=int(self._rvf_config['fine_size']),
             context_size=int(self._rvf_config['context_size']),
             source_mode=self._rvf_config['source_mode'],

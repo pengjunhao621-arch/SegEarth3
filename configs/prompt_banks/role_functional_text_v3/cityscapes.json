@@ -1,0 +1,408 @@
+{
+  "schema_version": 1,
+  "protocol": "role_functional_text_screen_v1",
+  "dataset": "Cityscapes",
+  "generator": "Codex; frozen role-functional candidates generated before evaluation from dataset ontology and visual geometry",
+  "frozen_before_evaluation": true,
+  "candidate_semantics": {
+    "presence": [
+      "P1: canonical visual existence or equivalent noun phrase",
+      "P2: multiplicity/area-oriented concept existence"
+    ],
+    "semantic": [
+      "S1: complete dense extent or spatial continuity",
+      "S2: silhouette/surface or coherent region appearance",
+      "S3: dataset-view-specific geometry and visual structure"
+    ],
+    "instance": [
+      "I1: individual object or connected component",
+      "I2: separated/bounded complete object or region"
+    ]
+  },
+  "classes": [
+    {
+      "id": 0,
+      "name": "road",
+      "official_prompts": [
+        "road"
+      ],
+      "presence_candidates": [
+        "visible road",
+        "road area"
+      ],
+      "semantic_candidates": [
+        "continuous road region",
+        "road pixels with coherent appearance",
+        "continuous drivable road surface"
+      ],
+      "instance_candidates": [
+        "connected road component",
+        "bounded road region"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "sidewalk",
+      "official_prompts": [
+        "sidewalk"
+      ],
+      "presence_candidates": [
+        "visible sidewalk",
+        "sidewalk area"
+      ],
+      "semantic_candidates": [
+        "continuous sidewalk region",
+        "sidewalk pixels with coherent appearance",
+        "continuous pedestrian pavement beside a road"
+      ],
+      "instance_candidates": [
+        "connected sidewalk component",
+        "bounded sidewalk region"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "building",
+      "official_prompts": [
+        "building"
+      ],
+      "presence_candidates": [
+        "visible building",
+        "building area"
+      ],
+      "semantic_candidates": [
+        "continuous building region",
+        "building pixels with coherent appearance",
+        "complete building facade and visible structure"
+      ],
+      "instance_candidates": [
+        "connected building component",
+        "bounded building region"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "wall",
+      "official_prompts": [
+        "wall"
+      ],
+      "presence_candidates": [
+        "visible wall",
+        "wall area"
+      ],
+      "semantic_candidates": [
+        "continuous wall region",
+        "wall pixels with coherent appearance",
+        "continuous vertical wall surface"
+      ],
+      "instance_candidates": [
+        "connected wall component",
+        "bounded wall region"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "fence",
+      "official_prompts": [
+        "fence"
+      ],
+      "presence_candidates": [
+        "visible fence",
+        "fence area"
+      ],
+      "semantic_candidates": [
+        "continuous fence region",
+        "fence pixels with coherent appearance",
+        "thin connected fence structure"
+      ],
+      "instance_candidates": [
+        "connected fence component",
+        "bounded fence region"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "pole",
+      "official_prompts": [
+        "pole"
+      ],
+      "presence_candidates": [
+        "visible pole",
+        "pole area"
+      ],
+      "semantic_candidates": [
+        "continuous pole region",
+        "pole pixels with coherent appearance",
+        "narrow vertical pole structure"
+      ],
+      "instance_candidates": [
+        "connected pole component",
+        "bounded pole region"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "trafficlight",
+      "official_prompts": [
+        "trafficlight"
+      ],
+      "presence_candidates": [
+        "visible traffic light",
+        "traffic light area"
+      ],
+      "semantic_candidates": [
+        "continuous traffic light region",
+        "traffic light pixels with coherent appearance",
+        "spatially connected traffic light surface"
+      ],
+      "instance_candidates": [
+        "connected traffic light component",
+        "bounded traffic light region"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "trafficsign",
+      "official_prompts": [
+        "trafficsign"
+      ],
+      "presence_candidates": [
+        "visible trafficsign",
+        "trafficsign area"
+      ],
+      "semantic_candidates": [
+        "continuous trafficsign region",
+        "trafficsign pixels with coherent appearance",
+        "spatially connected trafficsign surface"
+      ],
+      "instance_candidates": [
+        "connected trafficsign component",
+        "bounded trafficsign region"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "tree",
+      "official_prompts": [
+        "tree",
+        "hedge"
+      ],
+      "presence_candidates": [
+        "visible tree",
+        "tree area"
+      ],
+      "semantic_candidates": [
+        "continuous tree region",
+        "tree pixels with coherent appearance",
+        "complete tree canopy and trunk region"
+      ],
+      "instance_candidates": [
+        "connected tree component",
+        "bounded tree region"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "grass",
+      "official_prompts": [
+        "grass",
+        "horizontal vegetation",
+        "soil",
+        "sand"
+      ],
+      "presence_candidates": [
+        "visible grass",
+        "grass area"
+      ],
+      "semantic_candidates": [
+        "continuous grass region",
+        "grass pixels with coherent appearance",
+        "continuous low green vegetation cover"
+      ],
+      "instance_candidates": [
+        "connected grass component",
+        "bounded grass region"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "sky",
+      "official_prompts": [
+        "sky"
+      ],
+      "presence_candidates": [
+        "visible sky",
+        "sky area"
+      ],
+      "semantic_candidates": [
+        "continuous sky region",
+        "sky pixels with coherent appearance",
+        "continuous open sky region"
+      ],
+      "instance_candidates": [
+        "connected sky component",
+        "bounded sky region"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "person",
+      "official_prompts": [
+        "person"
+      ],
+      "presence_candidates": [
+        "visible person",
+        "one or more people"
+      ],
+      "semantic_candidates": [
+        "complete visible person extent",
+        "person silhouette and surface",
+        "complete human figure with head, torso and limbs"
+      ],
+      "instance_candidates": [
+        "individual person instance",
+        "separate complete person object"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "rider",
+      "official_prompts": [
+        "rider"
+      ],
+      "presence_candidates": [
+        "visible rider",
+        "one or more riders"
+      ],
+      "semantic_candidates": [
+        "complete visible rider extent",
+        "rider silhouette and surface",
+        "whole rider object including its boundary"
+      ],
+      "instance_candidates": [
+        "individual rider instance",
+        "separate complete rider object"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "car",
+      "official_prompts": [
+        "car"
+      ],
+      "presence_candidates": [
+        "visible car",
+        "one or more cars"
+      ],
+      "semantic_candidates": [
+        "complete visible car extent",
+        "car silhouette and surface",
+        "complete car body with a compact rectangular footprint"
+      ],
+      "instance_candidates": [
+        "individual car instance",
+        "separate complete car object"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "truck",
+      "official_prompts": [
+        "truck"
+      ],
+      "presence_candidates": [
+        "visible truck",
+        "one or more trucks"
+      ],
+      "semantic_candidates": [
+        "complete visible truck extent",
+        "truck silhouette and surface",
+        "large road vehicle with cab and cargo body"
+      ],
+      "instance_candidates": [
+        "individual truck instance",
+        "separate complete truck object"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "bus",
+      "official_prompts": [
+        "bus"
+      ],
+      "presence_candidates": [
+        "visible bus",
+        "one or more buses"
+      ],
+      "semantic_candidates": [
+        "complete visible bus extent",
+        "bus silhouette and surface",
+        "large elongated passenger vehicle body"
+      ],
+      "instance_candidates": [
+        "individual bus instance",
+        "separate complete bus object"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "train",
+      "official_prompts": [
+        "train"
+      ],
+      "presence_candidates": [
+        "visible train",
+        "one or more trains"
+      ],
+      "semantic_candidates": [
+        "complete visible train extent",
+        "train silhouette and surface",
+        "connected rail vehicle body"
+      ],
+      "instance_candidates": [
+        "individual train instance",
+        "separate complete train object"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "motorcycle",
+      "official_prompts": [
+        "motorcycle"
+      ],
+      "presence_candidates": [
+        "visible motorcycle",
+        "one or more motorcycles"
+      ],
+      "semantic_candidates": [
+        "complete visible motorcycle extent",
+        "motorcycle silhouette and surface",
+        "two-wheeled motor vehicle silhouette"
+      ],
+      "instance_candidates": [
+        "individual motorcycle instance",
+        "separate complete motorcycle object"
+      ]
+    },
+    {
+      "id": 18,
+      "name": "bicycle",
+      "official_prompts": [
+        "bicycle"
+      ],
+      "presence_candidates": [
+        "visible bicycle",
+        "one or more bicycles"
+      ],
+      "semantic_candidates": [
+        "complete visible bicycle extent",
+        "bicycle silhouette and surface",
+        "two-wheeled bicycle frame and wheels"
+      ],
+      "instance_candidates": [
+        "individual bicycle instance",
+        "separate complete bicycle object"
+      ]
+    }
+  ]
+}

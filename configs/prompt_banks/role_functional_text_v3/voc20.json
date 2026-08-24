@@ -1,0 +1,430 @@
+{
+  "schema_version": 1,
+  "protocol": "role_functional_text_screen_v1",
+  "dataset": "Pascal VOC20",
+  "generator": "Codex; frozen role-functional candidates generated before evaluation from dataset ontology and visual geometry",
+  "frozen_before_evaluation": true,
+  "candidate_semantics": {
+    "presence": [
+      "P1: canonical visual existence or equivalent noun phrase",
+      "P2: multiplicity/area-oriented concept existence"
+    ],
+    "semantic": [
+      "S1: complete dense extent or spatial continuity",
+      "S2: silhouette/surface or coherent region appearance",
+      "S3: dataset-view-specific geometry and visual structure"
+    ],
+    "instance": [
+      "I1: individual object or connected component",
+      "I2: separated/bounded complete object or region"
+    ]
+  },
+  "classes": [
+    {
+      "id": 0,
+      "name": "aeroplane",
+      "official_prompts": [
+        "aeroplane"
+      ],
+      "presence_candidates": [
+        "visible aeroplane",
+        "one or more aeroplanes"
+      ],
+      "semantic_candidates": [
+        "complete visible aeroplane extent",
+        "aeroplane silhouette and surface",
+        "aircraft body with wings and tail"
+      ],
+      "instance_candidates": [
+        "individual aeroplane instance",
+        "separate complete aeroplane object"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "bicycle",
+      "official_prompts": [
+        "bicycle"
+      ],
+      "presence_candidates": [
+        "visible bicycle",
+        "one or more bicycles"
+      ],
+      "semantic_candidates": [
+        "complete visible bicycle extent",
+        "bicycle silhouette and surface",
+        "two-wheeled bicycle frame and wheels"
+      ],
+      "instance_candidates": [
+        "individual bicycle instance",
+        "separate complete bicycle object"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "bird",
+      "official_prompts": [
+        "bird"
+      ],
+      "presence_candidates": [
+        "visible bird",
+        "one or more birds"
+      ],
+      "semantic_candidates": [
+        "complete visible bird extent",
+        "bird silhouette and surface",
+        "complete bird body and visible wings"
+      ],
+      "instance_candidates": [
+        "individual bird instance",
+        "separate complete bird object"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "boat",
+      "official_prompts": [
+        "boat",
+        "ship"
+      ],
+      "presence_candidates": [
+        "visible boat",
+        "one or more boats"
+      ],
+      "semantic_candidates": [
+        "complete visible boat extent",
+        "boat silhouette and surface",
+        "complete floating vessel hull"
+      ],
+      "instance_candidates": [
+        "individual boat instance",
+        "separate complete boat object"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "bottle",
+      "official_prompts": [
+        "bottle"
+      ],
+      "presence_candidates": [
+        "visible bottle",
+        "one or more bottles"
+      ],
+      "semantic_candidates": [
+        "complete visible bottle extent",
+        "bottle silhouette and surface",
+        "whole bottle object including its boundary"
+      ],
+      "instance_candidates": [
+        "individual bottle instance",
+        "separate complete bottle object"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "bus",
+      "official_prompts": [
+        "bus"
+      ],
+      "presence_candidates": [
+        "visible bus",
+        "one or more buses"
+      ],
+      "semantic_candidates": [
+        "complete visible bus extent",
+        "bus silhouette and surface",
+        "large elongated passenger vehicle body"
+      ],
+      "instance_candidates": [
+        "individual bus instance",
+        "separate complete bus object"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "car",
+      "official_prompts": [
+        "car"
+      ],
+      "presence_candidates": [
+        "visible car",
+        "one or more cars"
+      ],
+      "semantic_candidates": [
+        "complete visible car extent",
+        "car silhouette and surface",
+        "complete car body with a compact rectangular footprint"
+      ],
+      "instance_candidates": [
+        "individual car instance",
+        "separate complete car object"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "cat",
+      "official_prompts": [
+        "cat"
+      ],
+      "presence_candidates": [
+        "visible cat",
+        "one or more cats"
+      ],
+      "semantic_candidates": [
+        "complete visible cat extent",
+        "cat silhouette and surface",
+        "complete cat body and silhouette"
+      ],
+      "instance_candidates": [
+        "individual cat instance",
+        "separate complete cat object"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "chair",
+      "official_prompts": [
+        "chair"
+      ],
+      "presence_candidates": [
+        "visible chair",
+        "one or more chairs"
+      ],
+      "semantic_candidates": [
+        "complete visible chair extent",
+        "chair silhouette and surface",
+        "chair seat, back and supporting legs"
+      ],
+      "instance_candidates": [
+        "individual chair instance",
+        "separate complete chair object"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "cow",
+      "official_prompts": [
+        "cow"
+      ],
+      "presence_candidates": [
+        "visible cow",
+        "one or more cows"
+      ],
+      "semantic_candidates": [
+        "complete visible cow extent",
+        "cow silhouette and surface",
+        "complete cow body and legs"
+      ],
+      "instance_candidates": [
+        "individual cow instance",
+        "separate complete cow object"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "table",
+      "official_prompts": [
+        "table",
+        "diningtable"
+      ],
+      "presence_candidates": [
+        "visible table",
+        "one or more tables"
+      ],
+      "semantic_candidates": [
+        "complete visible table extent",
+        "table silhouette and surface",
+        "complete tabletop and supporting structure"
+      ],
+      "instance_candidates": [
+        "individual table instance",
+        "separate complete table object"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "dog",
+      "official_prompts": [
+        "dog"
+      ],
+      "presence_candidates": [
+        "visible dog",
+        "one or more dogs"
+      ],
+      "semantic_candidates": [
+        "complete visible dog extent",
+        "dog silhouette and surface",
+        "complete dog body and silhouette"
+      ],
+      "instance_candidates": [
+        "individual dog instance",
+        "separate complete dog object"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "horse",
+      "official_prompts": [
+        "horse"
+      ],
+      "presence_candidates": [
+        "visible horse",
+        "one or more horses"
+      ],
+      "semantic_candidates": [
+        "complete visible horse extent",
+        "horse silhouette and surface",
+        "complete horse body and legs"
+      ],
+      "instance_candidates": [
+        "individual horse instance",
+        "separate complete horse object"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "motorbike",
+      "official_prompts": [
+        "motorbike"
+      ],
+      "presence_candidates": [
+        "visible motorbike",
+        "one or more motorbikes"
+      ],
+      "semantic_candidates": [
+        "complete visible motorbike extent",
+        "motorbike silhouette and surface",
+        "whole motorbike object including its boundary"
+      ],
+      "instance_candidates": [
+        "individual motorbike instance",
+        "separate complete motorbike object"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "person",
+      "official_prompts": [
+        "person"
+      ],
+      "presence_candidates": [
+        "visible person",
+        "one or more people"
+      ],
+      "semantic_candidates": [
+        "complete visible person extent",
+        "person silhouette and surface",
+        "complete human figure with head, torso and limbs"
+      ],
+      "instance_candidates": [
+        "individual person instance",
+        "separate complete person object"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "pottedplant",
+      "official_prompts": [
+        "pottedplant"
+      ],
+      "presence_candidates": [
+        "visible potted plant",
+        "one or more potted plants"
+      ],
+      "semantic_candidates": [
+        "complete visible potted plant extent",
+        "potted plant silhouette and surface",
+        "whole potted plant object including its boundary"
+      ],
+      "instance_candidates": [
+        "individual potted plant instance",
+        "separate complete potted plant object"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "sheep",
+      "official_prompts": [
+        "sheep"
+      ],
+      "presence_candidates": [
+        "visible sheep",
+        "one or more sheep"
+      ],
+      "semantic_candidates": [
+        "complete visible sheep extent",
+        "sheep silhouette and surface",
+        "complete sheep body and woolly silhouette"
+      ],
+      "instance_candidates": [
+        "individual sheep instance",
+        "separate complete sheep object"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "sofa",
+      "official_prompts": [
+        "sofa"
+      ],
+      "presence_candidates": [
+        "visible sofa",
+        "one or more sofas"
+      ],
+      "semantic_candidates": [
+        "complete visible sofa extent",
+        "sofa silhouette and surface",
+        "complete upholstered sofa body"
+      ],
+      "instance_candidates": [
+        "individual sofa instance",
+        "separate complete sofa object"
+      ]
+    },
+    {
+      "id": 18,
+      "name": "train",
+      "official_prompts": [
+        "train"
+      ],
+      "presence_candidates": [
+        "visible train",
+        "one or more trains"
+      ],
+      "semantic_candidates": [
+        "complete visible train extent",
+        "train silhouette and surface",
+        "connected rail vehicle body"
+      ],
+      "instance_candidates": [
+        "individual train instance",
+        "separate complete train object"
+      ]
+    },
+    {
+      "id": 19,
+      "name": "television monitor",
+      "official_prompts": [
+        "television monitor",
+        "tv monitor",
+        "monitor",
+        "television",
+        "screen"
+      ],
+      "presence_candidates": [
+        "visible television monitor",
+        "one or more television monitors"
+      ],
+      "semantic_candidates": [
+        "complete visible television monitor extent",
+        "television monitor silhouette and surface",
+        "rectangular display screen and frame"
+      ],
+      "instance_candidates": [
+        "individual television monitor instance",
+        "separate complete television monitor object"
+      ]
+    }
+  ]
+}
