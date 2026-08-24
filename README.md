@@ -42,13 +42,14 @@
 
 This local workspace keeps the official SegEarth-OV3 baseline reproducible, but the follow-up research direction is now problem-driven rather than strictly training-free. The central constraint remains remote-sensing open-vocabulary semantic segmentation: SAM3 and the official inference pipeline are treated as the foundation, while later modules may be training-free, lightly calibrated, or learned if they directly address a verified failure mode and preserve a clean comparison to the official baseline.
 
-The current experiment is `role_functional_text_screen_v1`, a default-off,
-prediction-preserving test of whether SAM3's Presence, semantic and instance
-roles benefit from different text conditions. It independently grounds a
-frozen prompt bank, keeps the exact official dataset prompt set as the anchor,
-and reconstructs bounded role-specific interventions from one image encoding.
-The protected prediction remains the official baseline; all alternative maps
-are diagnostic outputs. Evaluation uses UDD5, VDD, Vaihingen, Potsdam,
+The retained method has two stages. `role_functional_text_screen_v1` tests
+whether SAM3's Presence, semantic and instance roles benefit from different
+text conditions while preserving the exact official dataset prompts as the
+anchor. `joint_role_view_profile_v1` then couples the selected Role profile
+with aligned Local/Context observations, and `joint_role_view_final_v1`
+performs the final residual-versus-direct and accuracy-versus-efficiency
+comparison. All paths are configuration-gated; the unmodified official
+baseline remains the default. Evaluation uses UDD5, VDD, Vaihingen, Potsdam,
 OpenEarthMap and LoveDA. iSAID is excluded while the local copy is incomplete.
 
 ## Abstract

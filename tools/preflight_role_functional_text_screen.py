@@ -12,30 +12,12 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from role_functional_text_definitions import (
-    BOUNDARY_GUIDES,
-    BOUNDARY_REPLAY_VARIANT_NAMES,
-    BOUNDARY_REPLAY_TRACE_TOLERANCE,
-    BOUNDARY_STRENGTHS,
-    CLASS_ROLE_ALIGNMENT_PE_LAYER,
-    CRA_COCO_WEIGHTS,
-    CRA_FCRA_TEMPERATURES,
-    CRA_VARIANT_NAMES,
     COMPLETION_PROTOCOL,
     DEFAULT_SETTING,
-    FUSION_AUDIT_MECHANISM_MAP_NAMES,
-    FUSION_AUDIT_VARIANT_NAMES,
-    GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES,
-    GLOBAL_LOCAL_MIX_WEIGHTS,
-    PI_MECHANISM_MAP_NAMES,
-    PI_VARIANT_NAMES,
-    PE_LAYER_IDS,
-    PE_VARIANT_NAMES,
     PROTOCOL,
     RESIDUAL_SETTINGS,
     ROLE_FIELDS,
-    ROLE_VISUAL_FIELD_COMPOSITIONS,
     ROLE_VISUAL_FIELD_PROTOCOL,
-    ROLE_VISUAL_FIELD_VARIANT_NAMES,
     VARIANT_NAMES,
     load_role_functional_text_bank,
     load_role_text_selection_registry,
@@ -57,21 +39,14 @@ def class_file(path):
 
 def static_checks():
     sources = (
-        'boundary_replay.py',
-        'class_role_alignment.py',
         'role_functional_text_definitions.py',
         'role_functional_text_screen.py',
         'role_visual_field.py',
         'segearthov3_segmentor.py',
         'tiled_context.py',
         'tools/summarize_role_functional_text_screen.py',
-        'tools/summarize_pi_role_compatibility.py',
-        'tools/summarize_pe_role_evidence.py',
-        'tools/summarize_boundary_replay.py',
-        'tools/summarize_class_role_alignment.py',
-        'tools/summarize_overall_best_fusion_audit.py',
-        'tools/summarize_global_local_evidence.py',
-        'tools/summarize_role_visual_field.py',
+        'tools/summarize_joint_role_view.py',
+        'tools/summarize_joint_role_view_final.py',
         'tools/verify_tiled_context.py',
     )
     for relative in sources:
@@ -136,31 +111,6 @@ def static_checks():
         assert int(visual['context_size']) > int(visual['fine_size']) > 0
         report['datasets'][dataset]['visual_field'] = visual
     assert len(set(VARIANT_NAMES)) == len(VARIANT_NAMES)
-    assert len(set(PI_VARIANT_NAMES)) == len(PI_VARIANT_NAMES)
-    assert len(set(PI_MECHANISM_MAP_NAMES)) == len(PI_MECHANISM_MAP_NAMES)
-    assert PE_LAYER_IDS == (7, 15, 23, 31)
-    assert len(set(PE_VARIANT_NAMES)) == len(PE_VARIANT_NAMES)
-    assert BOUNDARY_GUIDES == ('block23', 'rgb', 'uniform')
-    assert tuple(value for _, value in BOUNDARY_STRENGTHS) == (
-        0.25, 0.50, 1.00)
-    assert BOUNDARY_REPLAY_TRACE_TOLERANCE == 5e-3
-    assert (len(set(BOUNDARY_REPLAY_VARIANT_NAMES))
-            == len(BOUNDARY_REPLAY_VARIANT_NAMES))
-    assert CLASS_ROLE_ALIGNMENT_PE_LAYER == 18
-    assert tuple(value for _, value in CRA_COCO_WEIGHTS) == (
-        0.30, 0.50, 0.70, 0.90)
-    assert tuple(value for _, value in CRA_FCRA_TEMPERATURES) == (0.05, 0.10)
-    assert len(set(CRA_VARIANT_NAMES)) == len(CRA_VARIANT_NAMES)
-    assert len(set(FUSION_AUDIT_VARIANT_NAMES)) == len(
-        FUSION_AUDIT_VARIANT_NAMES)
-    assert FUSION_AUDIT_VARIANT_NAMES[:2] == (
-        'ofa_official', 'ofa_native')
-    assert len(set(FUSION_AUDIT_MECHANISM_MAP_NAMES)) == 6
-    assert tuple(value for _, value in GLOBAL_LOCAL_MIX_WEIGHTS) == (
-        0.25, 0.50, 0.75)
-    assert len(set(GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES)) == 14
-    assert len(ROLE_VISUAL_FIELD_COMPOSITIONS) == 8
-    assert len(set(ROLE_VISUAL_FIELD_VARIANT_NAMES)) == 18
     assert DEFAULT_SETTING == 'alpha050_clip025'
     assert len(RESIDUAL_SETTINGS) == 5
     report['checks'] = [
@@ -171,22 +121,10 @@ def static_checks():
         'no-update role composition is checked against the exact baseline',
         'single-role, full-combination, shared-text and head-only maps exist',
         'five residual points separate alpha from clipping sensitivity',
-        'PI replays freeze admission, amplitude and head-winner sites',
-        'completion banks define selected and anchor-admission combinations',
-        'P0 completion controls are required to equal native admission',
-        'PE screen reads true ViT blocks 7/15/23/31 in one image forward',
         'best overall and best all-nonzero role compositions are registered',
-        'boundary replay keeps block23/RGB/uniform controls and three fixed strengths',
-        'anchor-clamped replay has separate P/S/I/all counterfactual paths',
-        'class-role alignment reads PE block18 once and preserves fixed admission',
-        'CoCo class calibration excludes synonym expansion and double Presence',
-        'FCRA compares raw role difference with class-centered role evidence',
-        'fusion audit compares matched operators around the exact official baseline',
-        'fusion audit records losing residuals, head takeover and class transitions',
-        'visual-field screen has two views and all eight P/S/I assignments',
-        'visual-field FFF is identity-anchored to official/current Role-Text',
-        'global/local screen keeps complete per-view grounding and three fixed mixtures',
-        'global/local oracle records complementarity without selecting predictions',
+        'Joint Role--View keeps complete Local/Global grounding endpoints',
+        'final profiles preserve an exact zero-update baseline identity',
+        'residual and direct Role updates remain available for final comparison',
         'RemoteCLIP, CLIP APIs, training and online candidate selection are absent',
     ]
     return report

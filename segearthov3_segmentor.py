@@ -1,7 +1,6 @@
-"""SegEarth-OV3 baseline with config-gated role-text/visual-field screens.
+"""SegEarth-OV3 baseline with the retained Role-Text/Role-View method.
 
-The official SAM3 inference path remains the default. Optional experiments
-return that protected prediction while recording counterfactual variants.
+The official SAM3 inference path remains the default and reproducible.
 """
 
 import os
@@ -14,11 +13,7 @@ from mmseg.models.segmentors import BaseSegmentor
 from mmseg.registry import MODELS
 from PIL import Image
 
-from boundary_replay import BoundaryReplayMixin
-from class_role_alignment import ClassRoleAlignmentMixin
-from context_recomposition import ContextRecompositionMixin
 from role_functional_text_screen import RoleFunctionalTextScreenMixin
-from role_multimodal_fusion import RoleMultimodalFusionMixin
 from role_visual_field import RoleVisualFieldMixin
 from sam3 import build_sam3_image_model
 from sam3.model.data_misc import interpolate as sam3_interpolate
@@ -27,10 +22,7 @@ from sam3.model.sam3_image_processor import Sam3Processor
 
 @MODELS.register_module()
 class SegEarthOV3Segmentation(
-        ContextRecompositionMixin, RoleMultimodalFusionMixin,
-        RoleVisualFieldMixin,
-        ClassRoleAlignmentMixin, BoundaryReplayMixin,
-        RoleFunctionalTextScreenMixin, BaseSegmentor):
+        RoleVisualFieldMixin, RoleFunctionalTextScreenMixin, BaseSegmentor):
     """Frozen SAM3 segmentor with one config-gated diagnostic extension."""
 
     def __init__(
@@ -59,17 +51,9 @@ class SegEarthOV3Segmentation(
             role_prompt_tta_save_npz=False,
             role_prompt_tta_artifact_max_side=128,
             role_prompt_tta_max_saved_images=8,
-            role_prompt_tta_pi_diagnosis=False,
-            role_prompt_tta_pi_presence_slot=0,
-            role_prompt_tta_pi_instance_slot=0,
-            role_prompt_tta_completion_diagnosis=False,
-            role_prompt_tta_pe_diagnosis=False,
-            role_prompt_tta_boundary_replay_diagnosis=False,
-            role_prompt_tta_class_role_alignment=False,
-            role_prompt_tta_fusion_audit=False,
             role_prompt_tta_visual_field_diagnosis=False,
             role_prompt_tta_visual_field_registry=None,
-            role_prompt_tta_visual_field_mode='role_allocations',
+            role_prompt_tta_visual_field_mode='joint_role_view_final',
             role_prompt_tta_joint_profile_registry=None,
             role_prompt_tta_joint_final_registry=None,
             role_prompt_tta_final_profile='audit',
@@ -135,28 +119,11 @@ class SegEarthOV3Segmentation(
                 role_prompt_tta_artifact_max_side),
             role_prompt_tta_max_saved_images=(
                 role_prompt_tta_max_saved_images),
-            role_prompt_tta_pi_diagnosis=(
-                role_prompt_tta_pi_diagnosis),
-            role_prompt_tta_pi_presence_slot=(
-                role_prompt_tta_pi_presence_slot),
-            role_prompt_tta_pi_instance_slot=(
-                role_prompt_tta_pi_instance_slot),
-            role_prompt_tta_completion_diagnosis=(
-                role_prompt_tta_completion_diagnosis),
-            role_prompt_tta_pe_diagnosis=(
-                role_prompt_tta_pe_diagnosis),
-            role_prompt_tta_boundary_replay_diagnosis=(
-                role_prompt_tta_boundary_replay_diagnosis),
-            role_prompt_tta_class_role_alignment=(
-                role_prompt_tta_class_role_alignment),
-            role_prompt_tta_fusion_audit=(
-                role_prompt_tta_fusion_audit),
             role_prompt_tta_visual_field_diagnosis=(
                 role_prompt_tta_visual_field_diagnosis),
             role_prompt_tta_selection_registry=(
                 role_prompt_tta_selection_registry),
         )
-        self._br_initialize()
         self._rvf_initialize(
             role_prompt_tta_visual_field_diagnosis=(
                 role_prompt_tta_visual_field_diagnosis),
@@ -297,82 +264,6 @@ class SegEarthOV3Segmentation(
             if return_components and self._uses_role_prompt_tta()
             else None)
         role_view_stats = [] if role_predictions is not None else None
-        pi_predictions = (
-            {
-                name: torch.zeros(
-                    (self.num_cls, image_height, image_width),
-                    dtype=torch.float32, device='cpu')
-                for name in self._rpt_pi_variant_names()
-            }
-            if role_predictions is not None
-            and self._rpt_uses_pi_diagnosis()
-            else None)
-        pi_mechanism_maps = (
-            {
-                name: torch.zeros(
-                    (self.num_cls, image_height, image_width),
-                    dtype=torch.float32, device='cpu')
-                for name in self._rpt_pi_mechanism_map_names()
-            }
-            if pi_predictions is not None else None)
-        completion_predictions = (
-            {
-                name: torch.zeros(
-                    (self.num_cls, image_height, image_width),
-                    dtype=torch.float32, device='cpu')
-                for name in self._rpt_completion_variant_names()
-            }
-            if role_predictions is not None
-            and self._rpt_uses_completion_diagnosis()
-            else None)
-        pe_predictions = (
-            {
-                name: torch.zeros(
-                    (self.num_cls, image_height, image_width),
-                    dtype=torch.float32, device='cpu')
-                for name in self._rpt_pe_variant_names()
-            }
-            if role_predictions is not None
-            and self._rpt_uses_pe_diagnosis()
-            else None)
-        boundary_replay_predictions = (
-            {
-                name: torch.zeros(
-                    (self.num_cls, image_height, image_width),
-                    dtype=torch.float32, device='cpu')
-                for name in self._br_variant_names()
-            }
-            if role_predictions is not None
-            and self._rpt_uses_boundary_replay()
-            else None)
-        class_role_alignment_predictions = (
-            {
-                name: torch.zeros(
-                    (self.num_cls, image_height, image_width),
-                    dtype=torch.float32, device='cpu')
-                for name in self._cra_variant_names()
-            }
-            if role_predictions is not None
-            and self._rpt_uses_class_role_alignment()
-            else None)
-        fusion_audit_predictions = (
-            {
-                name: torch.zeros(
-                    (self.num_cls, image_height, image_width),
-                    dtype=torch.float32, device='cpu')
-                for name in self._rpt_fusion_audit_variant_names()
-            }
-            if role_predictions is not None
-            and self._rpt_uses_fusion_audit()
-            else None)
-        fusion_audit_mechanism_maps = (
-            {
-                name: torch.zeros(
-                    (self.num_cls, image_height, image_width),
-                    dtype=torch.float32, device='cpu')
-                for name in self._rpt_fusion_audit_mechanism_map_names()
-            }
-            if fusion_audit_predictions is not None else None)
 
         height_grids = (
             max(image_height - height_crop + height_stride - 1, 0)
@@ -412,51 +303,6 @@ class SegEarthOV3Segmentation(
                             role_predictions[name][:, y1:y2, x1:x2] += value
                         role_view_stats.extend(
                             crop_components['role_prompt_view_stats'])
-                        if pi_predictions is not None:
-                            for name, value in crop_components[
-                                    'role_prompt_pi_variant_class_logits'
-                            ].items():
-                                pi_predictions[name][:, y1:y2, x1:x2] += value
-                            for name, value in crop_components[
-                                    'role_prompt_pi_mechanism_class_maps'
-                            ].items():
-                                pi_mechanism_maps[name][
-                                    :, y1:y2, x1:x2] += value
-                        if completion_predictions is not None:
-                            for name, value in crop_components[
-                                    'role_prompt_completion_variant_class_logits'
-                            ].items():
-                                completion_predictions[name][
-                                    :, y1:y2, x1:x2] += value
-                        if pe_predictions is not None:
-                            for name, value in crop_components[
-                                    'role_prompt_pe_variant_class_logits'
-                            ].items():
-                                pe_predictions[name][
-                                    :, y1:y2, x1:x2] += value
-                        if boundary_replay_predictions is not None:
-                            for name, value in crop_components[
-                                    'role_prompt_boundary_replay_class_logits'
-                            ].items():
-                                boundary_replay_predictions[name][
-                                    :, y1:y2, x1:x2] += value
-                        if class_role_alignment_predictions is not None:
-                            for name, value in crop_components[
-                                    'role_prompt_class_role_alignment_logits'
-                            ].items():
-                                class_role_alignment_predictions[name][
-                                    :, y1:y2, x1:x2] += value
-                        if fusion_audit_predictions is not None:
-                            for name, value in crop_components[
-                                    'role_prompt_fusion_audit_class_logits'
-                            ].items():
-                                fusion_audit_predictions[name][
-                                    :, y1:y2, x1:x2] += value
-                            for name, value in crop_components[
-                                    'role_prompt_fusion_audit_mechanism_class_maps'
-                            ].items():
-                                fusion_audit_mechanism_maps[name][
-                                    :, y1:y2, x1:x2] += value
 
         if torch.any(counts == 0):
             raise RuntimeError('Sparse sliding-window coverage.')
@@ -491,84 +337,6 @@ class SegEarthOV3Segmentation(
             role_predictions['combo_p0_s0_i0'] = exact_baseline.clone()
             components['role_prompt_variant_class_logits'] = role_predictions
             components['role_prompt_view_stats'] = role_view_stats
-            if pi_predictions is not None:
-                for name in pi_predictions:
-                    pi_predictions[name] = (
-                        pi_predictions[name] / cpu_counts)
-                pi_anchor = pi_predictions['pi_native_p0_i0'].clone()
-                for name in pi_predictions:
-                    pi_predictions[name] = (
-                        exact_baseline + pi_predictions[name] - pi_anchor
-                    ).clamp(0.0, 1.0)
-                pi_predictions['pi_native_p0_i0'] = exact_baseline.clone()
-                for name in pi_mechanism_maps:
-                    pi_mechanism_maps[name] = (
-                        pi_mechanism_maps[name] / cpu_counts)
-                components['role_prompt_pi_variant_class_logits'] = (
-                    pi_predictions)
-                components['role_prompt_pi_mechanism_class_maps'] = (
-                    pi_mechanism_maps)
-            if completion_predictions is not None:
-                for name in completion_predictions:
-                    completion_predictions[name] = (
-                        exact_baseline
-                        + completion_predictions[name] / cpu_counts
-                        - crop_anchor
-                    ).clamp(0.0, 1.0)
-                components[
-                    'role_prompt_completion_variant_class_logits'] = (
-                        completion_predictions)
-            if pe_predictions is not None:
-                for name in pe_predictions:
-                    pe_predictions[name] = (
-                        exact_baseline + pe_predictions[name] / cpu_counts
-                        - crop_anchor).clamp(0.0, 1.0)
-                components['role_prompt_pe_variant_class_logits'] = (
-                    pe_predictions)
-            if boundary_replay_predictions is not None:
-                boundary_anchor = (
-                    boundary_replay_predictions['br_official']
-                    / cpu_counts)
-                for name in boundary_replay_predictions:
-                    boundary_replay_predictions[name] = (
-                        exact_baseline
-                        + boundary_replay_predictions[name] / cpu_counts
-                        - boundary_anchor).clamp(0.0, 1.0)
-                boundary_replay_predictions['br_official'] = (
-                    exact_baseline.clone())
-                components['role_prompt_boundary_replay_class_logits'] = (
-                    boundary_replay_predictions)
-            if class_role_alignment_predictions is not None:
-                alignment_anchor = (
-                    class_role_alignment_predictions['cra_official']
-                    / cpu_counts)
-                for name in class_role_alignment_predictions:
-                    class_role_alignment_predictions[name] = (
-                        exact_baseline
-                        + class_role_alignment_predictions[name] / cpu_counts
-                        - alignment_anchor).clamp(0.0, 1.0)
-                class_role_alignment_predictions['cra_official'] = (
-                    exact_baseline.clone())
-                components['role_prompt_class_role_alignment_logits'] = (
-                    class_role_alignment_predictions)
-            if fusion_audit_predictions is not None:
-                fusion_anchor = (
-                    fusion_audit_predictions['ofa_official'] / cpu_counts)
-                for name in fusion_audit_predictions:
-                    fusion_audit_predictions[name] = (
-                        exact_baseline
-                        + fusion_audit_predictions[name] / cpu_counts
-                        - fusion_anchor).clamp(0.0, 1.0)
-                fusion_audit_predictions['ofa_official'] = (
-                    exact_baseline.clone())
-                for name in fusion_audit_mechanism_maps:
-                    fusion_audit_mechanism_maps[name] = (
-                        fusion_audit_mechanism_maps[name] / cpu_counts)
-                components['role_prompt_fusion_audit_class_logits'] = (
-                    fusion_audit_predictions)
-                components[
-                    'role_prompt_fusion_audit_mechanism_class_maps'] = (
-                        fusion_audit_mechanism_maps)
         return predictions, components
 
     def predict(self, inputs, data_samples):
@@ -610,7 +378,6 @@ class SegEarthOV3Segmentation(
                     'pred_sem_seg': PixelData(data=prediction.unsqueeze(0)),
                 })
                 continue
-
             needs_components = self._uses_role_prompt_tta()
 
             use_sliding = (
@@ -655,79 +422,6 @@ class SegEarthOV3Segmentation(
                                 mode='bilinear',
                                 align_corners=False,
                             ).squeeze(0))
-                    if 'role_prompt_pi_variant_class_logits' in components:
-                        for field in (
-                                'role_prompt_pi_variant_class_logits',
-                                'role_prompt_pi_mechanism_class_maps'):
-                            for name, value in components[field].items():
-                                components[field][name] = F.interpolate(
-                                    value.unsqueeze(0),
-                                    size=original_shape,
-                                    mode='bilinear',
-                                    align_corners=False,
-                                ).squeeze(0)
-                    if ('role_prompt_completion_variant_class_logits'
-                            in components):
-                        for name, value in components[
-                                'role_prompt_completion_variant_class_logits'
-                        ].items():
-                            components[
-                                'role_prompt_completion_variant_class_logits'
-                            ][name] = F.interpolate(
-                                value.unsqueeze(0),
-                                size=original_shape,
-                                mode='bilinear',
-                                align_corners=False,
-                            ).squeeze(0)
-                    if 'role_prompt_pe_variant_class_logits' in components:
-                        for name, value in components[
-                                'role_prompt_pe_variant_class_logits'].items():
-                            components[
-                                'role_prompt_pe_variant_class_logits'][name] = (
-                                    F.interpolate(
-                                        value.unsqueeze(0),
-                                        size=original_shape,
-                                        mode='bilinear',
-                                        align_corners=False,
-                                    ).squeeze(0))
-                    if ('role_prompt_boundary_replay_class_logits'
-                            in components):
-                        for name, value in components[
-                                'role_prompt_boundary_replay_class_logits'
-                        ].items():
-                            components[
-                                'role_prompt_boundary_replay_class_logits'
-                            ][name] = F.interpolate(
-                                value.unsqueeze(0),
-                                size=original_shape,
-                                mode='bilinear',
-                                align_corners=False,
-                            ).squeeze(0)
-                    if ('role_prompt_class_role_alignment_logits'
-                            in components):
-                        for name, value in components[
-                                'role_prompt_class_role_alignment_logits'
-                        ].items():
-                            components[
-                                'role_prompt_class_role_alignment_logits'
-                            ][name] = F.interpolate(
-                                value.unsqueeze(0),
-                                size=original_shape,
-                                mode='bilinear',
-                                align_corners=False,
-                            ).squeeze(0)
-                    if ('role_prompt_fusion_audit_class_logits'
-                            in components):
-                        for field in (
-                                'role_prompt_fusion_audit_class_logits',
-                                'role_prompt_fusion_audit_mechanism_class_maps'):
-                            for name, value in components[field].items():
-                                components[field][name] = F.interpolate(
-                                    value.unsqueeze(0),
-                                    size=original_shape,
-                                    mode='bilinear',
-                                    align_corners=False,
-                                ).squeeze(0)
 
             class_logits = self._aggregate_query_logits_to_classes(
                 query_logits)
@@ -741,22 +435,6 @@ class SegEarthOV3Segmentation(
                     components.get('role_prompt_view_stats', []),
                     data_sample,
                     image_path,
-                    pi_variant_logits=components.get(
-                        'role_prompt_pi_variant_class_logits'),
-                    pi_mechanism_maps=components.get(
-                        'role_prompt_pi_mechanism_class_maps'),
-                    completion_variant_logits=components.get(
-                        'role_prompt_completion_variant_class_logits'),
-                    pe_variant_logits=components.get(
-                        'role_prompt_pe_variant_class_logits'),
-                    boundary_replay_variant_logits=components.get(
-                        'role_prompt_boundary_replay_class_logits'),
-                    class_role_alignment_logits=components.get(
-                        'role_prompt_class_role_alignment_logits'),
-                    fusion_audit_logits=components.get(
-                        'role_prompt_fusion_audit_class_logits'),
-                    fusion_audit_mechanism_maps=components.get(
-                        'role_prompt_fusion_audit_mechanism_class_maps'),
                 )
             data_sample.set_data({
                 'seg_logits': PixelData(data=class_logits),

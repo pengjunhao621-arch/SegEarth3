@@ -1,4 +1,4 @@
-"""Role-specific Fine/Context visual-field diagnosis for frozen SAM3."""
+"""Frozen SAM3 Joint Role--View profiling and final inference."""
 
 import json
 import os
@@ -8,19 +8,13 @@ import torch
 import torch.nn.functional as F
 
 from role_functional_text_definitions import (
-    GLOBAL_LOCAL_EVIDENCE_PROTOCOL,
-    GLOBAL_LOCAL_EVIDENCE_SCHEMA_VERSION,
-    GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES,
-    GLOBAL_LOCAL_MIX_WEIGHTS,
     JOINT_ROLE_VIEW_OPERATOR_SPECS,
     JOINT_ROLE_VIEW_FINAL_PROTOCOL,
     JOINT_ROLE_VIEW_FINAL_SCHEMA_VERSION,
     JOINT_ROLE_VIEW_PROTOCOL,
     JOINT_ROLE_VIEW_SCHEMA_VERSION,
-    ROLE_VISUAL_FIELD_COMPOSITIONS,
     ROLE_VISUAL_FIELD_PROTOCOL,
     ROLE_VISUAL_FIELD_SCHEMA_VERSION,
-    ROLE_VISUAL_FIELD_VARIANT_NAMES,
     load_joint_role_view_registry,
     load_joint_role_view_final_registry,
 )
@@ -30,12 +24,6 @@ from tiled_context import CoordinateTileIndex
 
 RVF_PROTOCOL = ROLE_VISUAL_FIELD_PROTOCOL
 RVF_SCHEMA_VERSION = ROLE_VISUAL_FIELD_SCHEMA_VERSION
-RVF_COMPOSITIONS = ROLE_VISUAL_FIELD_COMPOSITIONS
-RVF_VARIANT_NAMES = ROLE_VISUAL_FIELD_VARIANT_NAMES
-GLV_PROTOCOL = GLOBAL_LOCAL_EVIDENCE_PROTOCOL
-GLV_SCHEMA_VERSION = GLOBAL_LOCAL_EVIDENCE_SCHEMA_VERSION
-GLV_VARIANT_NAMES = GLOBAL_LOCAL_EVIDENCE_VARIANT_NAMES
-GLV_MIX_WEIGHTS = GLOBAL_LOCAL_MIX_WEIGHTS
 JRV_PROTOCOL = JOINT_ROLE_VIEW_PROTOCOL
 JRV_SCHEMA_VERSION = JOINT_ROLE_VIEW_SCHEMA_VERSION
 JRV_OPERATOR_SPECS = JOINT_ROLE_VIEW_OPERATOR_SPECS
@@ -69,7 +57,7 @@ class RoleVisualFieldMixin:
     def _rvf_initialize(
             self, role_prompt_tta_visual_field_diagnosis=False,
             role_prompt_tta_visual_field_registry=None,
-            role_prompt_tta_visual_field_mode='role_allocations',
+            role_prompt_tta_visual_field_mode='joint_role_view_final',
             role_prompt_tta_joint_profile_registry=None,
             role_prompt_tta_joint_final_registry=None,
             role_prompt_tta_final_profile='audit'):
@@ -91,14 +79,10 @@ class RoleVisualFieldMixin:
             raise ValueError(
                 'Visual-field diagnosis requires its registry JSON.')
         if self.role_prompt_tta_visual_field_mode not in (
-                'role_allocations', 'global_local', 'multimodal_fusion',
-                'context_recomposition', 'joint_role_view',
-                'joint_role_view_final'):
+                'joint_role_view', 'joint_role_view_final'):
             raise ValueError(
                 'role_prompt_tta_visual_field_mode must be '
-                "'role_allocations', 'global_local', or "
-                "'multimodal_fusion', 'context_recomposition', or "
-                "'joint_role_view', or 'joint_role_view_final'.")
+                "'joint_role_view' or 'joint_role_view_final'.")
         if self._rpt_role_selection is None:
             raise ValueError(
                 'Visual-field diagnosis requires the role-text selection.')
@@ -485,129 +469,6 @@ class RoleVisualFieldMixin:
             ))
         return units
 
-    def _rvf_accumulate_visual_units(self, image, image_path):
-        height, width = image.height, image.width
-        counts = torch.zeros((1, height, width), dtype=torch.float32)
-        query_sum = torch.zeros(
-            (self.num_queries, height, width), dtype=torch.float32)
-        raw = OrderedDict(
-            (name, torch.zeros(
-                (self.num_cls, height, width), dtype=torch.float32))
-            for name in RVF_VARIANT_NAMES[2:])
-        unit_stats = []
-        for unit_index, unit in enumerate(
-                self._rvf_visual_units(image, image_path)):
-            fine = self._rvf_ground_view(unit['fine'])
-            context = self._rvf_ground_view(unit['context'])
-            x1, y1, x2, y2 = unit['target_box']
-            query_sum[:, y1:y2, x1:x2] += fine['query_final']
-            counts[:, y1:y2, x1:x2] += 1.0
-            official = self._aggregate_query_logits_to_classes(
-                fine['query_final'])
-            anchor_roles, text_roles = {}, {}
-            instance_cache = {}
-            for composition in RVF_COMPOSITIONS:
-                anchor_roles[composition] = torch.stack([
-                    self._rvf_compose_class(
-                        fine, context, class_index, composition, 'anchor',
-                        unit['fine_roi'], unit['context_roi'], instance_cache)
-                    for class_index in range(self.num_cls)
-                ])
-                text_roles[composition] = torch.stack([
-                    self._rvf_compose_class(
-                        fine, context, class_index, composition, 'text',
-                        unit['fine_roi'], unit['context_roi'], instance_cache)
-                    for class_index in range(self.num_cls)
-                ])
-            anchor_fff = anchor_roles['FFF']
-            best_fine = (
-                official + text_roles['FFF'] - anchor_fff).clamp(0.0, 1.0)
-            for composition in RVF_COMPOSITIONS:
-                raw[f'rvf_anchor_{composition}'][:, y1:y2, x1:x2] += (
-                    official + anchor_roles[composition] - anchor_fff
-                ).clamp(0.0, 1.0)
-                raw[f'rvf_text_{composition}'][:, y1:y2, x1:x2] += (
-                    best_fine + text_roles[composition]
-                    - text_roles['FFF']).clamp(0.0, 1.0)
-            unit_stats.append(dict(
-                unit_index=int(unit_index),
-                target_box=list(unit['target_box']),
-                fine_size=[unit['fine'].width, unit['fine'].height],
-                context_size=[unit['context'].width, unit['context'].height],
-                context_roi=list(unit['context_roi']),
-                source_prefix=unit['metadata']['source_prefix'],
-                source_canvas=unit['metadata']['source_canvas'],
-                context_box=unit['metadata']['context_box'],
-                contributor_tiles=unit['metadata']['contributor_tiles'],
-            ))
-            del fine, context, anchor_roles, text_roles
-        if torch.any(counts == 0):
-            raise RuntimeError('Visual-field Fine units left uncovered pixels.')
-        query_mean = query_sum / counts
-        exact_fine = self._aggregate_query_logits_to_classes(query_mean)
-        for name in raw:
-            raw[name] /= counts
-        anchor_fff = raw['rvf_anchor_FFF'].clone()
-        for composition in RVF_COMPOSITIONS:
-            name = f'rvf_anchor_{composition}'
-            raw[name] = (
-                exact_fine + raw[name] - anchor_fff).clamp(0.0, 1.0)
-        fine_best = (
-            exact_fine + raw['rvf_text_FFF'] - anchor_fff).clamp(0.0, 1.0)
-        text_fff = raw['rvf_text_FFF'].clone()
-        for composition in RVF_COMPOSITIONS:
-            name = f'rvf_text_{composition}'
-            raw[name] = (
-                fine_best + raw[name] - text_fff).clamp(0.0, 1.0)
-        return query_mean, exact_fine, fine_best, raw, unit_stats
-
-    def _rvf_accumulate_official_units(self, image):
-        use_sliding = (
-            self.slide_crop > 0
-            and (self.slide_crop < image.width
-                 or self.slide_crop < image.height))
-        boxes = (self._rvf_grid_boxes(
-            image.width, image.height, self.slide_crop, self.slide_stride)
-            if use_sliding else [(0, 0, image.width, image.height)])
-        height, width = image.height, image.width
-        counts = torch.zeros((1, height, width), dtype=torch.float32)
-        query_sum = torch.zeros(
-            (self.num_queries, height, width), dtype=torch.float32)
-        unit_official = torch.zeros(
-            (self.num_cls, height, width), dtype=torch.float32)
-        unit_best = torch.zeros_like(unit_official)
-        for box in boxes:
-            x1, y1, x2, y2 = box
-            view = self._rvf_ground_view(image.crop(box))
-            official = self._aggregate_query_logits_to_classes(
-                view['query_final'])
-            cache = {}
-            roi = (0, 0, x2 - x1, y2 - y1)
-            roles_anchor = torch.stack([
-                self._rvf_compose_class(
-                    view, view, class_index, 'FFF', 'anchor',
-                    roi, roi, cache)
-                for class_index in range(self.num_cls)
-            ])
-            roles_text = torch.stack([
-                self._rvf_compose_class(
-                    view, view, class_index, 'FFF', 'text',
-                    roi, roi, cache)
-                for class_index in range(self.num_cls)
-            ])
-            best = (official + roles_text - roles_anchor).clamp(0.0, 1.0)
-            query_sum[:, y1:y2, x1:x2] += view['query_final']
-            unit_official[:, y1:y2, x1:x2] += official
-            unit_best[:, y1:y2, x1:x2] += best
-            counts[:, y1:y2, x1:x2] += 1.0
-            del view
-        query_mean = query_sum / counts
-        exact = self._aggregate_query_logits_to_classes(query_mean)
-        unit_official /= counts
-        unit_best /= counts
-        best_exact = (exact + unit_best - unit_official).clamp(0.0, 1.0)
-        return query_mean, exact, best_exact
-
     def _rvf_fine_matches_official(self, image):
         if self._rvf_config['source_mode'] == 'coordinate_tiles':
             return (image.width <= self._rvf_config['fine_size']
@@ -622,7 +483,7 @@ class RoleVisualFieldMixin:
         return (image.width <= self._rvf_config['fine_size']
                 and image.height <= self._rvf_config['fine_size'])
 
-    def _glv_global_source(self, image):
+    def _jrv_global_source(self, image):
         """Choose the complementary observation, not a dataset label rule."""
         if self._rvf_config['source_mode'] == 'coordinate_tiles':
             return 'aligned_context'
@@ -636,193 +497,6 @@ class RoleVisualFieldMixin:
                 or image.height > self._rvf_config['fine_size']):
             return 'full_image'
         return 'aligned_context'
-
-    def _glv_ground_target(self, view, roi):
-        """Read one complete view while keeping native P/S/I grounding."""
-        official = self._rvf_crop(
-            self._aggregate_query_logits_to_classes(view['query_final']), roi)
-        cache = {}
-        anchor = torch.stack([
-            self._rvf_compose_class(
-                view, view, class_index, 'FFF', 'anchor', roi, roi, cache)
-            for class_index in range(self.num_cls)
-        ])
-        text = torch.stack([
-            self._rvf_compose_class(
-                view, view, class_index, 'FFF', 'text', roi, roi, cache)
-            for class_index in range(self.num_cls)
-        ])
-        best_text = (official + text - anchor).clamp(0.0, 1.0)
-        return official, best_text
-
-    def _glv_accumulate_units(self, image, image_path, need_context):
-        """Build aligned high-resolution Local and larger-FoV Context maps."""
-        height, width = image.height, image.width
-        counts = torch.zeros((1, height, width), dtype=torch.float32)
-        local_query_sum = torch.zeros(
-            (self.num_queries, height, width), dtype=torch.float32)
-        local_anchor_sum = torch.zeros(
-            (self.num_cls, height, width), dtype=torch.float32)
-        local_text_sum = torch.zeros_like(local_anchor_sum)
-        context_query_sum = (
-            torch.zeros_like(local_query_sum) if need_context else None)
-        context_anchor_sum = (
-            torch.zeros_like(local_anchor_sum) if need_context else None)
-        context_text_sum = (
-            torch.zeros_like(local_anchor_sum) if need_context else None)
-        unit_stats = []
-        context_cache = {}
-        for unit_index, unit in enumerate(
-                self._rvf_visual_units(image, image_path)):
-            x1, y1, x2, y2 = unit['target_box']
-            fine = self._rvf_ground_view(unit['fine'])
-            local_anchor, local_text = self._glv_ground_target(
-                fine, unit['fine_roi'])
-            local_query_sum[:, y1:y2, x1:x2] += self._rvf_crop(
-                fine['query_final'], unit['fine_roi'])
-            local_anchor_sum[:, y1:y2, x1:x2] += local_anchor
-            local_text_sum[:, y1:y2, x1:x2] += local_text
-            counts[:, y1:y2, x1:x2] += 1.0
-
-            if need_context:
-                context_key = (
-                    unit['metadata']['source_prefix'],
-                    tuple(unit['metadata']['source_canvas']),
-                    tuple(unit['metadata']['context_box']),
-                )
-                if context_key not in context_cache:
-                    context_cache[context_key] = self._rvf_ground_view(
-                        unit['context'])
-                context = context_cache[context_key]
-                context_anchor, context_text = self._glv_ground_target(
-                    context, unit['context_roi'])
-                context_query_sum[:, y1:y2, x1:x2] += self._rvf_crop(
-                    context['query_final'], unit['context_roi'])
-                context_anchor_sum[:, y1:y2, x1:x2] += context_anchor
-                context_text_sum[:, y1:y2, x1:x2] += context_text
-
-            unit_stats.append(dict(
-                unit_index=int(unit_index),
-                target_box=list(unit['target_box']),
-                local_size=[unit['fine'].width, unit['fine'].height],
-                context_size=[
-                    unit['context'].width, unit['context'].height],
-                context_roi=list(unit['context_roi']),
-                source_prefix=unit['metadata']['source_prefix'],
-                source_canvas=unit['metadata']['source_canvas'],
-                context_box=unit['metadata']['context_box'],
-                contributor_tiles=unit['metadata']['contributor_tiles'],
-            ))
-            del fine
-
-        if torch.any(counts == 0):
-            raise RuntimeError('Global/local units left uncovered pixels.')
-        local_query = local_query_sum / counts
-        local_exact = self._aggregate_query_logits_to_classes(local_query)
-        local_anchor_mean = local_anchor_sum / counts
-        local_text = (
-            local_exact + local_text_sum / counts - local_anchor_mean
-        ).clamp(0.0, 1.0)
-        result = dict(
-            local_query=local_query,
-            local_anchor=local_exact,
-            local_text=local_text,
-            context_anchor=None,
-            context_text=None,
-            units=unit_stats,
-            unique_context_views=len(context_cache),
-        )
-        if need_context:
-            context_query = context_query_sum / counts
-            context_exact = self._aggregate_query_logits_to_classes(
-                context_query)
-            context_anchor_mean = context_anchor_sum / counts
-            result.update(
-                context_anchor=context_exact,
-                context_text=(
-                    context_exact + context_text_sum / counts
-                    - context_anchor_mean).clamp(0.0, 1.0),
-            )
-        return result
-
-    def _glv_predict_image(self, image, image_path):
-        """Evaluate Global/Local complementarity before adding an adapter."""
-        global_source = self._glv_global_source(image)
-        unit_values = self._glv_accumulate_units(
-            image, image_path, need_context=(
-                global_source == 'aligned_context'))
-        fine_matches = self._rvf_fine_matches_official(image)
-        if fine_matches:
-            official_query = unit_values['local_query']
-            official = unit_values['local_anchor']
-            best_text = unit_values['local_text']
-        else:
-            official_query, official, best_text = (
-                self._rvf_accumulate_official_units(image))
-
-        local_anchor = unit_values['local_anchor']
-        local_text = unit_values['local_text']
-        if global_source == 'full_image':
-            global_anchor, global_text = official, best_text
-        else:
-            global_anchor = unit_values['context_anchor']
-            global_text = unit_values['context_text']
-
-        variants = OrderedDict(
-            (name, torch.empty_like(official))
-            for name in GLV_VARIANT_NAMES)
-        variants['glv_official'].copy_(official)
-        variants['glv_best_text'].copy_(best_text)
-        variants['glv_anchor_local'].copy_(local_anchor)
-        variants['glv_anchor_global'].copy_(global_anchor)
-        variants['glv_text_local'].copy_(local_text)
-        variants['glv_text_global'].copy_(global_text)
-        for name, global_weight in GLV_MIX_WEIGHTS:
-            local_weight = 1.0 - float(global_weight)
-            variants[f'glv_anchor_mix_{name}'].copy_((
-                local_weight * local_anchor
-                + float(global_weight) * global_anchor).clamp(0.0, 1.0))
-            variants[f'glv_text_mix_{name}'].copy_((
-                local_weight * local_text
-                + float(global_weight) * global_text).clamp(0.0, 1.0))
-        variants['glv_anchor_max'].copy_(
-            torch.maximum(local_anchor, global_anchor))
-        variants['glv_text_max'].copy_(
-            torch.maximum(local_text, global_text))
-
-        reference_endpoint = (
-            'local' if fine_matches else 'global')
-        reference_anchor = (
-            local_anchor if fine_matches else global_anchor)
-        reference_text = local_text if fine_matches else global_text
-        identity_error = max(
-            float((reference_anchor - official).abs().max()),
-            float((reference_text - best_text).abs().max()))
-        if (self.role_prompt_tta_strict_integrity
-                and identity_error > self.role_prompt_tta_integrity_tolerance):
-            raise RuntimeError(
-                f'Global/local reference identity failed: {identity_error}.')
-        metadata = dict(
-            schema_version=GLV_SCHEMA_VERSION,
-            protocol=GLV_PROTOCOL,
-            variants=list(GLV_VARIANT_NAMES),
-            mix_weights=dict(GLV_MIX_WEIGHTS),
-            local_size=int(self._rvf_config['fine_size']),
-            context_size=int(self._rvf_config['context_size']),
-            source_mode=self._rvf_config['source_mode'],
-            global_source=global_source,
-            reference_endpoint=reference_endpoint,
-            selected_slots=list(
-                self._rpt_role_selection['_best_overall_slots']),
-            selected_admission=self._rpt_role_selection[
-                'best_overall']['admission'],
-            reference_identity_max_abs=float(identity_error),
-            native_prompt_parity_max_abs=float(
-                self._rpt_native_parity_max_abs or 0.0),
-            units=unit_values['units'],
-            unique_context_views=int(unit_values['unique_context_views']),
-        )
-        return official_query.to(self.device), variants, metadata
 
     def _jrv_ground_target(
             self, view, roi, candidates, include_direct=False,
@@ -1176,7 +850,7 @@ class RoleVisualFieldMixin:
                 for identifier, value in (direct_roles or {}).items())
             identity_error = 0.0
         else:
-            global_source = self._glv_global_source(image)
+            global_source = self._jrv_global_source(image)
             unit_values = self._jrv_accumulate_visual_units(
                 image, image_path,
                 need_context=(global_source == 'aligned_context'),
@@ -1292,7 +966,7 @@ class RoleVisualFieldMixin:
     def _jrv_predict_image(self, image, image_path):
         """Build the shared Local/Global evidence bank for joint profiling."""
         candidates = self._jrv_config['role_candidates']
-        global_source = self._glv_global_source(image)
+        global_source = self._jrv_global_source(image)
         unit_values = self._jrv_accumulate_visual_units(
             image, image_path, need_context=(global_source == 'aligned_context'),
             candidates=candidates)
@@ -1366,78 +1040,7 @@ class RoleVisualFieldMixin:
             return self._jrv_final_predict_image(image, image_path)
         if self.role_prompt_tta_visual_field_mode == 'joint_role_view':
             return self._jrv_predict_image(image, image_path)
-        if self.role_prompt_tta_visual_field_mode == 'global_local':
-            return self._glv_predict_image(image, image_path)
-        if self.role_prompt_tta_visual_field_mode == 'multimodal_fusion':
-            return self._rmf_predict_image(image, image_path)
-        if self.role_prompt_tta_visual_field_mode == 'context_recomposition':
-            return self._cr_predict_image(image, image_path)
-        (fine_query, fine_exact, fine_best, raw,
-         unit_stats) = self._rvf_accumulate_visual_units(image, image_path)
-        if self._rvf_fine_matches_official(image):
-            official_query, official, best_text = (
-                fine_query, fine_exact, fine_best)
-            reused_fine = True
-        else:
-            official_query, official, best_text = (
-                self._rvf_accumulate_official_units(image))
-            reused_fine = False
-        variants = OrderedDict(
-            (name, torch.empty_like(official)) for name in RVF_VARIANT_NAMES)
-        variants['rvf_official'].copy_(official)
-        variants['rvf_best_text'].copy_(best_text)
-        anchor_reference = raw['rvf_anchor_FFF']
-        text_reference = raw['rvf_text_FFF']
-        for composition in RVF_COMPOSITIONS:
-            variants[f'rvf_anchor_{composition}'].copy_((
-                official + raw[f'rvf_anchor_{composition}']
-                - anchor_reference).clamp(0.0, 1.0))
-            variants[f'rvf_text_{composition}'].copy_((
-                best_text + raw[f'rvf_text_{composition}']
-                - text_reference).clamp(0.0, 1.0))
-        identity_error = max(
-            float((variants['rvf_anchor_FFF'] - official).abs().max()),
-            float((variants['rvf_text_FFF'] - best_text).abs().max()))
-        if (self.role_prompt_tta_strict_integrity
-                and identity_error > self.role_prompt_tta_integrity_tolerance):
-            raise RuntimeError(
-                f'Visual-field FFF identity failed: {identity_error}.')
-        metadata = dict(
-            schema_version=RVF_SCHEMA_VERSION,
-            protocol=RVF_PROTOCOL,
-            variants=list(RVF_VARIANT_NAMES),
-            compositions=list(RVF_COMPOSITIONS),
-            fine_size=int(self._rvf_config['fine_size']),
-            context_size=int(self._rvf_config['context_size']),
-            source_mode=self._rvf_config['source_mode'],
-            selected_slots=list(
-                self._rpt_role_selection['_best_overall_slots']),
-            selected_admission=self._rpt_role_selection[
-                'best_overall']['admission'],
-            selected_prompts=[
-                dict(
-                    class_name=item['name'],
-                    presence=(
-                        item['presence_candidates'][slots[0] - 1]
-                        if slots[0] else list(item['official_prompts'])),
-                    semantic=(
-                        item['semantic_candidates'][slots[1] - 1]
-                        if slots[1] else list(item['official_prompts'])),
-                    instance=(
-                        item['instance_candidates'][slots[2] - 1]
-                        if slots[2] else list(item['official_prompts'])),
-                )
-                for item in self._rpt_prompt_bank['classes']
-                for slots in [
-                    self._rpt_role_selection['_best_overall_slots']]
-            ],
-            official_reused_fine=bool(reused_fine),
-            native_prompt_parity_max_abs=float(
-                self._rpt_native_parity_max_abs or 0.0),
-            fff_identity_max_abs=float(identity_error),
-            units=unit_stats,
-        )
-        return official_query.to(self.device), variants, metadata
+        raise RuntimeError('Unsupported Joint Role--View mode.')
 
     def _rvf_record_image(
             self, variants, metadata, data_sample, image_path):
@@ -1447,55 +1050,8 @@ class RoleVisualFieldMixin:
         if self.role_prompt_tta_visual_field_mode == 'joint_role_view':
             return self._jrv_record_image(
                 variants, metadata, data_sample, image_path)
-        if self.role_prompt_tta_visual_field_mode == 'global_local':
-            return self._glv_record_image(
-                variants, metadata, data_sample, image_path)
-        if self.role_prompt_tta_visual_field_mode == 'multimodal_fusion':
-            return self._rmf_record_image(
-                variants, metadata, data_sample, image_path)
-        if self.role_prompt_tta_visual_field_mode == 'context_recomposition':
-            return self._cr_record_image(
-                variants, metadata, data_sample, image_path)
-        if not self.dump_role_prompt_tta_stats:
-            return
-        gt = data_sample.gt_sem_seg.data.squeeze().detach().long().cpu()
-        valid = gt != 255
-        predictions = {
-            name: self._rpt_threshold(value).to(torch.int16)
-            for name, value in variants.items()
-        }
-        rows = OrderedDict()
-        for name in RVF_VARIANT_NAMES:
-            reference_name = (
-                'rvf_best_text' if name.startswith('rvf_text_')
-                else 'rvf_official')
-            prediction = predictions[name]
-            reference = predictions[reference_name]
-            changed = valid & (prediction != reference)
-            improved = changed & (prediction == gt) & (reference != gt)
-            harmed = changed & (prediction != gt) & (reference == gt)
-            rows[name] = dict(
-                reference_variant=reference_name,
-                confusion=self._rpt_confusion(prediction, gt, valid),
-                changed_pixels=int(changed.sum()),
-                improved_pixels=int(improved.sum()),
-                harmed_pixels=int(harmed.sum()),
-                help_minus_harm=int(improved.sum()) - int(harmed.sum()),
-            )
-        record = dict(
-            schema_version=RVF_SCHEMA_VERSION,
-            rank=int(os.environ.get('RANK', 0)),
-            local_rank=int(os.environ.get('LOCAL_RANK', 0)),
-            dataset_name=self.role_prompt_tta_dataset_name,
-            img_path=image_path,
-            class_names=list(self.class_names),
-            valid_pixels=int(valid.sum()),
-            prob_thd=float(self.prob_thd),
-            role_visual_field=dict(metadata, variants=rows),
-        )
-        self._rpt_write_stats(record)
+        raise RuntimeError('Unsupported Joint Role--View mode.')
 
-    @staticmethod
     def _rvf_resize_variants(variants, output_shape):
         """Resize flat experiment maps or the compact Joint endpoint bank."""
         if variants.get('joint_role_view_final', False):
@@ -1736,109 +1292,6 @@ class RoleVisualFieldMixin:
             valid_pixels=int(valid.sum()),
             prob_thd=float(self.prob_thd),
             joint_role_view=dict(
-                metadata, variants=rows,
-                complementarity=complementarity),
-        )
-        self._rpt_write_stats(record)
-
-    def _glv_record_image(
-            self, variants, metadata, data_sample, image_path):
-        """Save exact performance and complementarity, never raw full maps."""
-        if not self.dump_role_prompt_tta_stats:
-            return
-        gt = data_sample.gt_sem_seg.data.squeeze().detach().long().cpu()
-        valid = gt != 255
-        predictions = {
-            name: self._rpt_threshold(value).to(torch.int16)
-            for name, value in variants.items()
-        }
-        rows = OrderedDict()
-        for name in GLV_VARIANT_NAMES:
-            if name == 'glv_official':
-                reference_name = 'glv_official'
-            elif name == 'glv_best_text':
-                reference_name = 'glv_best_text'
-            elif name.startswith('glv_anchor_'):
-                reference_name = 'glv_official'
-            else:
-                reference_name = 'glv_best_text'
-            prediction = predictions[name]
-            reference = predictions[reference_name]
-            changed = valid & (prediction != reference)
-            improved = changed & (prediction == gt) & (reference != gt)
-            harmed = changed & (prediction != gt) & (reference == gt)
-            reference_fg = reference != self.bg_idx
-            prediction_fg = prediction != self.bg_idx
-            rows[name] = dict(
-                reference_variant=reference_name,
-                confusion=self._rpt_confusion(prediction, gt, valid),
-                changed_pixels=int(changed.sum()),
-                improved_pixels=int(improved.sum()),
-                harmed_pixels=int(harmed.sum()),
-                help_minus_harm=int(improved.sum()) - int(harmed.sum()),
-                background_to_foreground_pixels=int((
-                    changed & ~reference_fg & prediction_fg).sum()),
-                foreground_to_background_pixels=int((
-                    changed & reference_fg & ~prediction_fg).sum()),
-                foreground_to_foreground_pixels=int((
-                    changed & reference_fg & prediction_fg).sum()),
-            )
-
-        complementarity = OrderedDict()
-        for family in ('anchor', 'text'):
-            local_name = f'glv_{family}_local'
-            global_name = f'glv_{family}_global'
-            local = predictions[local_name]
-            global_value = predictions[global_name]
-            local_correct = valid & (local == gt)
-            global_correct = valid & (global_value == gt)
-            local_only = local_correct & ~global_correct
-            global_only = global_correct & ~local_correct
-            both_correct = local_correct & global_correct
-            both_wrong = valid & ~local_correct & ~global_correct
-            disagreement = valid & (local != global_value)
-            oracle = local.clone()
-            oracle[global_only] = global_value[global_only]
-            class_rows = []
-            for class_index, class_name in enumerate(self.class_names):
-                target = valid & (gt == class_index)
-                class_rows.append(dict(
-                    class_index=int(class_index),
-                    class_name=class_name,
-                    target_pixels=int(target.sum()),
-                    local_only_correct_pixels=int((target & local_only).sum()),
-                    global_only_correct_pixels=int((target & global_only).sum()),
-                    both_correct_pixels=int((target & both_correct).sum()),
-                    both_wrong_pixels=int((target & both_wrong).sum()),
-                ))
-            score_delta = (
-                variants[local_name].float()
-                - variants[global_name].float()).abs()
-            complementarity[family] = dict(
-                local_variant=local_name,
-                global_variant=global_name,
-                valid_pixels=int(valid.sum()),
-                disagreement_pixels=int(disagreement.sum()),
-                local_only_correct_pixels=int(local_only.sum()),
-                global_only_correct_pixels=int(global_only.sum()),
-                both_correct_pixels=int(both_correct.sum()),
-                both_wrong_pixels=int(both_wrong.sum()),
-                mean_abs_score_difference=float(score_delta.mean()),
-                score_entries=int(score_delta.numel()),
-                oracle_confusion=self._rpt_confusion(oracle, gt, valid),
-                class_rows=class_rows,
-            )
-
-        record = dict(
-            schema_version=GLV_SCHEMA_VERSION,
-            rank=int(os.environ.get('RANK', 0)),
-            local_rank=int(os.environ.get('LOCAL_RANK', 0)),
-            dataset_name=self.role_prompt_tta_dataset_name,
-            img_path=image_path,
-            class_names=list(self.class_names),
-            valid_pixels=int(valid.sum()),
-            prob_thd=float(self.prob_thd),
-            global_local_evidence=dict(
                 metadata, variants=rows,
                 complementarity=complementarity),
         )
