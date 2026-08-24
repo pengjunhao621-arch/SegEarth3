@@ -9,7 +9,7 @@ saved as mode-L uint8 masks because Pillow 11.3 corrupts the original
 
 import argparse
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
 from PIL import Image
@@ -39,6 +39,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--patch-width', type=int, default=1280)
     parser.add_argument('--patch-height', type=int, default=1080)
     parser.add_argument('--overlap-area', type=int, default=0)
+    parser.add_argument(
+        '--check-only', action='store_true',
+        help='Fully decode every paired source PNG and exit without writing.')
     return parser.parse_args()
 
 
@@ -91,6 +94,18 @@ def output_name(sequence: str, frame: Path, y: int, x: int,
         f'{sequence}_{frame.stem}_{y}_{y + height}_{x}_{x + width}.png')
 
 
+def find_broken_pngs(paths: Iterable[Path]) -> List[Tuple[Path, str]]:
+    """Fully decode PNGs so truncated downloads are reported before cropping."""
+    broken = []
+    for path in paths:
+        try:
+            with Image.open(path) as image:
+                image.load()
+        except (OSError, SyntaxError, ValueError) as error:
+            broken.append((path, f'{type(error).__name__}: {error}'))
+    return broken
+
+
 def main() -> int:
     args = parse_args()
     raw_root = args.dataset_path.resolve() / 'test_gt'
@@ -104,11 +119,6 @@ def main() -> int:
     if args.overlap_area < 0 or args.overlap_area >= min(
             args.patch_width, args.patch_height):
         raise ValueError('Invalid --overlap-area.')
-    for directory in (image_output, label_output):
-        if directory.exists() and any(directory.iterdir()):
-            raise RuntimeError(f'Output directory must be empty: {directory}')
-        directory.mkdir(parents=True, exist_ok=True)
-
     image_sources = sorted(raw_root.glob('*/Images/*.png'))
     label_sources = sorted(raw_root.glob('*/Labels/*.png'))
     image_keys = {(p.parent.parent.name, p.name): p for p in image_sources}
@@ -124,21 +134,46 @@ def main() -> int:
         raise RuntimeError(
             f'No paired PNGs found below {raw_root}/<seq>/Images and Labels.')
 
+    print(f'Found {len(image_keys)} paired UAVid test frames.')
+    broken = find_broken_pngs(list(image_sources) + list(label_sources))
+    if broken:
+        details = '\n'.join(
+            f'  {path}: {reason}' for path, reason in broken)
+        raise RuntimeError(
+            f'Found {len(broken)} corrupt or truncated source PNG(s):\n'
+            f'{details}\nRe-extract or re-download only the listed source files.')
+    print(f'PASSED: fully decoded {len(image_sources)} images and '
+          f'{len(label_sources)} labels.')
+    if args.check_only:
+        return 0
+
+    for directory in (image_output, label_output):
+        if directory.exists() and any(directory.iterdir()):
+            raise RuntimeError(f'Output directory must be empty: {directory}')
+        directory.mkdir(parents=True, exist_ok=True)
+
     stride_x = args.patch_width - args.overlap_area
     stride_y = args.patch_height - args.overlap_area
     histogram = np.zeros(256, dtype=np.uint64)
     generated = 0
 
-    print(f'Found {len(image_keys)} paired UAVid test frames.')
     for index, key in enumerate(sorted(image_keys), 1):
         sequence, _ = key
         image_path = image_keys[key]
         label_path = label_keys[key]
-        with Image.open(image_path) as image:
-            image_array = np.asarray(image.convert('RGB'))
-        with Image.open(label_path) as label:
-            label_array = rgb_to_train_ids(
-                np.asarray(label.convert('RGB')), label_path)
+        try:
+            with Image.open(image_path) as image:
+                image_array = np.asarray(image.convert('RGB'))
+        except (OSError, SyntaxError, ValueError) as error:
+            raise RuntimeError(
+                f'Failed to decode source image: {image_path}') from error
+        try:
+            with Image.open(label_path) as label:
+                label_array = rgb_to_train_ids(
+                    np.asarray(label.convert('RGB')), label_path)
+        except (OSError, SyntaxError, ValueError) as error:
+            raise RuntimeError(
+                f'Failed to decode source label: {label_path}') from error
         if image_array.shape[:2] != label_array.shape:
             raise RuntimeError(
                 f'Image/label shape mismatch: {image_path} '
