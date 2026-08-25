@@ -4,6 +4,337 @@
   "stage": "dataset_profile_discovery",
   "note": "Exhaustive 3x4x3 Role compositions share one cached prompt bank; each is evaluated with the common 15-operator Local/Global family. source_miou/prior_view_miou are intentionally absent because these datasets have no prior Role-View screen.",
   "datasets": {
+    "uavid": {
+      "anchor_candidate": "anchor",
+      "current_role_candidate": "anchor",
+      "prior_view_operator": "global",
+      "role_candidates": [
+        {
+          "id": "anchor",
+          "slots": [
+            0,
+            0,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s0_i1",
+          "slots": [
+            0,
+            0,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s0_i2",
+          "slots": [
+            0,
+            0,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s1_i0",
+          "slots": [
+            0,
+            1,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s1_i1",
+          "slots": [
+            0,
+            1,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s1_i2",
+          "slots": [
+            0,
+            1,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s2_i0",
+          "slots": [
+            0,
+            2,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s2_i1",
+          "slots": [
+            0,
+            2,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s2_i2",
+          "slots": [
+            0,
+            2,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s3_i0",
+          "slots": [
+            0,
+            3,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s3_i1",
+          "slots": [
+            0,
+            3,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p0_s3_i2",
+          "slots": [
+            0,
+            3,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s0_i0",
+          "slots": [
+            1,
+            0,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s0_i1",
+          "slots": [
+            1,
+            0,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s0_i2",
+          "slots": [
+            1,
+            0,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s1_i0",
+          "slots": [
+            1,
+            1,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s1_i1",
+          "slots": [
+            1,
+            1,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s1_i2",
+          "slots": [
+            1,
+            1,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s2_i0",
+          "slots": [
+            1,
+            2,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s2_i1",
+          "slots": [
+            1,
+            2,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s2_i2",
+          "slots": [
+            1,
+            2,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s3_i0",
+          "slots": [
+            1,
+            3,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s3_i1",
+          "slots": [
+            1,
+            3,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p1_s3_i2",
+          "slots": [
+            1,
+            3,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s0_i0",
+          "slots": [
+            2,
+            0,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s0_i1",
+          "slots": [
+            2,
+            0,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s0_i2",
+          "slots": [
+            2,
+            0,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s1_i0",
+          "slots": [
+            2,
+            1,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s1_i1",
+          "slots": [
+            2,
+            1,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s1_i2",
+          "slots": [
+            2,
+            1,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s2_i0",
+          "slots": [
+            2,
+            2,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s2_i1",
+          "slots": [
+            2,
+            2,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s2_i2",
+          "slots": [
+            2,
+            2,
+            2
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s3_i0",
+          "slots": [
+            2,
+            3,
+            0
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s3_i1",
+          "slots": [
+            2,
+            3,
+            1
+          ],
+          "admission": "native"
+        },
+        {
+          "id": "p2_s3_i2",
+          "slots": [
+            2,
+            3,
+            2
+          ],
+          "admission": "native"
+        }
+      ]
+    },
     "voc20": {
       "anchor_candidate": "anchor",
       "current_role_candidate": "anchor",

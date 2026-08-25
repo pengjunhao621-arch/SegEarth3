@@ -1,6 +1,28 @@
 {
   "schema_version": 1,
   "datasets": {
+    "uavid": {
+      "prompt_bank": "configs/prompt_banks/role_functional_text_v3/uavid.json",
+      "best_overall": {
+        "slots": [
+          0,
+          0,
+          0
+        ],
+        "admission": "native",
+        "status": "discovery_anchor"
+      },
+      "best_all_nonzero": {
+        "slots": [
+          1,
+          1,
+          1
+        ],
+        "admission": "native",
+        "status": "discovery_control"
+      },
+      "instance_diagnostic_slot": 1
+    },
     "voc20": {
       "prompt_bank": "configs/prompt_banks/role_functional_text_v3/voc20.json",
       "best_overall": {

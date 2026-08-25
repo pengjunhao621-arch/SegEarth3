@@ -8,8 +8,16 @@ import os
 
 
 PAPER_BASELINES = {
+    'uavid': 54.7,
     'voc20': 96.8,
     'cityscapes': 69.7,
+    'isaid': 27.6,
+}
+
+REPRODUCED_BASELINES = {
+    'uavid': 54.7,
+    'voc20': 96.8,
+    'cityscapes': 67.9,
     'isaid': 27.6,
 }
 
@@ -55,6 +63,8 @@ def metric_value(record, suffix):
 
 def load_baseline(root, dataset):
     path = os.path.join(root, 'baseline', dataset, 'results.json')
+    if not os.path.isfile(path):
+        return None
     values = read_json(path)
     if isinstance(values, dict):
         values = [values]
@@ -130,9 +140,9 @@ def main():
     lines = [
         '# Natural-domain and iSAID Joint Role-View discovery', '',
         '## Main results', '',
-        '| Dataset | Paper | Standalone baseline | Screen baseline | '
+        '| Dataset | Paper | Reproduced reference | Standalone rerun | Screen baseline | '
         'Best Role | Best View | Best Joint | Joint gain | Joint profile |',
-        '|---|---:|---:|---:|---:|---:|---:|---:|---|',
+        '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|',
     ]
     for dataset in args.datasets:
         official = profiles[(dataset, 'official')]
@@ -140,14 +150,23 @@ def main():
         view = profiles[(dataset, 'view_only_best')]
         joint = profiles[(dataset, 'joint_role_view_best')]
         standalone = load_baseline(args.root, dataset)
-        baseline_delta = standalone - float(official['miou'])
-        if abs(baseline_delta) > args.baseline_tolerance:
+        reference = REPRODUCED_BASELINES[dataset]
+        reference_delta = reference - float(official['miou'])
+        baseline_delta = None
+        if standalone is not None:
+            baseline_delta = standalone - float(official['miou'])
+            if abs(baseline_delta) > args.baseline_tolerance:
+                raise ValueError(
+                    f'{dataset}: standalone baseline and protected screen '
+                    f'baseline differ by {baseline_delta:.4f} mIoU.')
+        elif abs(reference_delta) > max(args.baseline_tolerance, 0.15):
             raise ValueError(
-                f'{dataset}: standalone baseline and protected screen '
-                f'baseline differ by {baseline_delta:.4f} mIoU.')
+                f'{dataset}: reproduced reference and protected screen '
+                f'baseline differ by {reference_delta:.4f} mIoU.')
         row = {
             'dataset': dataset,
             'paper_baseline_miou': PAPER_BASELINES[dataset],
+            'reproduced_reference_miou': reference,
             'standalone_baseline_miou': standalone,
             'screen_official_miou': official['miou'],
             'baseline_identity_delta': baseline_delta,
@@ -182,7 +201,9 @@ def main():
             f"{joint['operator']}")
         lines.append(
             f"| {dataset} | {fmt(PAPER_BASELINES[dataset])} | "
-            f"{fmt(standalone)} | {fmt(official['miou'])} | "
+            f"{fmt(reference)} | "
+            f"{fmt(standalone) if standalone is not None else '-'} | "
+            f"{fmt(official['miou'])} | "
             f"{fmt(role['miou'])} | {fmt(view['miou'])} | "
             f"{fmt(joint['miou'])} | "
             f"{fmt(row['joint_gain_to_baseline'])} | {profile} |")

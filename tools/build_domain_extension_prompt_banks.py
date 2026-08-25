@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build frozen Role prompt banks for VOC20, Cityscapes and iSAID.
+"""Build frozen Role prompt banks for UAVid and the domain extensions.
 
 The generated prompts follow the same functional contract as the retained
 remote-sensing banks: Presence receives existence-oriented noun phrases,
@@ -222,6 +222,80 @@ ISAID_PROMPTS = {
 }
 
 
+UAVID_PROMPTS = {
+    'background': {
+        'presence': ['visible image background', 'non-target urban background'],
+        'semantic': [
+            'remaining background pixels',
+            'continuous non-target aerial background',
+            'unclassified overhead background surface'],
+        'instance': [
+            'connected background component',
+            'bounded non-target background region'],
+    },
+    'building': {
+        'presence': ['visible buildings', 'one or more building structures'],
+        'semantic': [
+            'complete building footprint',
+            'rectilinear rooftop surface',
+            'overhead building roofs with sharp boundaries'],
+        'instance': [
+            'individual building region',
+            'separate complete building footprint'],
+    },
+    'road': {
+        'presence': ['visible roads', 'road network'],
+        'semantic': [
+            'continuous drivable road surface',
+            'elongated paved roadway',
+            'overhead connected road network'],
+        'instance': [
+            'connected road component',
+            'bounded complete road region'],
+    },
+    'car': {
+        'presence': ['visible cars', 'one or more road vehicles'],
+        'semantic': [
+            'complete compact car footprint',
+            'rectangular vehicle roof surface',
+            'small overhead vehicle body'],
+        'instance': [
+            'individual car',
+            'separate complete vehicle footprint'],
+    },
+    'tree': {
+        'presence': ['visible trees', 'tree canopy cover'],
+        'semantic': [
+            'complete tree canopy extent',
+            'coarse-textured tree crowns',
+            'overhead individual and grouped tree canopies'],
+        'instance': [
+            'individual tree crown',
+            'separate complete canopy region'],
+    },
+    'vegetation': {
+        'presence': ['visible low vegetation', 'vegetation cover'],
+        'semantic': [
+            'continuous low-vegetation surface',
+            'fine-textured vegetated ground',
+            'overhead coherent vegetation cover'],
+        'instance': [
+            'connected vegetation component',
+            'bounded vegetation patch'],
+    },
+    'human': {
+        'presence': ['visible people', 'one or more humans'],
+        'semantic': [
+            'complete human figure extent',
+            'small upright human silhouette',
+            'visible pedestrian body'],
+        'instance': [
+            'individual person',
+            'separate complete human figure'],
+    },
+}
+
+
 def parse_classes(path):
     rows = []
     with open(path, encoding='utf-8') as handle:
@@ -279,6 +353,10 @@ def generic_prompts(name, is_thing):
 
 def dataset_specs():
     return {
+        'uavid': dict(
+            label='UAVid', class_file='configs/cls_uavid.txt',
+            thing=lambda index, name: name in {
+                'building', 'car', 'tree', 'human'}),
         'voc20': dict(
             label='Pascal VOC20', class_file='configs/cls_voc20.txt',
             thing=lambda index, name: True),
@@ -297,8 +375,12 @@ def build_bank(key, spec):
     rows = parse_classes(os.path.join(ROOT, spec['class_file']))
     for index, official in enumerate(rows):
         name = official[0]
+        special = {
+            'isaid': ISAID_PROMPTS,
+            'uavid': UAVID_PROMPTS,
+        }.get(key)
         prompts = (
-            ISAID_PROMPTS[name] if key == 'isaid'
+            special[name] if special is not None
             else generic_prompts(name, spec['thing'](index, name)))
         classes.append({
             'id': index,
@@ -374,6 +456,9 @@ def build_visual_registry():
             'isaid': {
                 'source_mode': 'image', 'fine_size': 512,
                 'context_size': 896, 'reference_endpoint': 'global'},
+            'uavid': {
+                'source_mode': 'image', 'fine_size': 640,
+                'context_size': 1280, 'reference_endpoint': 'global'},
         },
     }
 

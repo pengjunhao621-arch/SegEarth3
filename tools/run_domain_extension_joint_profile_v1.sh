@@ -6,7 +6,7 @@ ROOT="${ROOT:-logs/domain_extension_joint_profile_v1}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 GPU_LIST="${GPU_LIST:-0,1,2,3}"
 NPROC="${NPROC:-4}"
-DATASETS="${DATASETS:-isaid voc20 cityscapes}"
+DATASETS="${DATASETS:-uavid}"
 DATA_HOME="${DATA_HOME:-/home/PengJunhao/workspace/data}"
 SMOKE_SAMPLES="${SMOKE_SAMPLES:-1}"
 INTEGRITY_TOLERANCE="${INTEGRITY_TOLERANCE:-1e-5}"
@@ -18,6 +18,7 @@ config_for() {
         voc20) echo "configs/cfg_voc20.py" ;;
         cityscapes) echo "configs/cfg_city_scapes.py" ;;
         isaid) echo "configs/cfg_isaid.py" ;;
+        uavid) echo "configs/cfg_uavid.py" ;;
         *) echo "Unknown dataset: $1" >&2; return 2 ;;
     esac
 }
@@ -27,6 +28,7 @@ root_override_for() {
         voc20) echo "${VOC20_ROOT:-}" ;;
         cityscapes) echo "${CITYSCAPES_ROOT:-}" ;;
         isaid) echo "${ISAID_ROOT:-}" ;;
+        uavid) echo "${UAVID_ROOT:-}" ;;
     esac
 }
 
@@ -41,6 +43,7 @@ root_candidates_for() {
                 "${DATA_HOME}/cityscapes"
             ;;
         isaid) printf '%s\n' "${DATA_HOME}/iSAID" ;;
+        uavid) printf '%s\n' "${DATA_HOME}/UAVid" ;;
     esac
 }
 
@@ -60,6 +63,10 @@ has_layout() {
         isaid)
             [[ -d "${root}/img_dir/val" \
                 && -d "${root}/ann_dir/val" ]]
+            ;;
+        uavid)
+            [[ -d "${root}/img_dir/test" \
+                && -d "${root}/ann_dir/test" ]]
             ;;
     esac
 }
@@ -218,6 +225,12 @@ case "${MODE}" in
         ;;
     baseline-all) preflight; collect_baseline full ;;
     screen-all) preflight; collect_screen full ;;
+    uavid-main)
+        DATASETS="uavid"
+        preflight
+        collect_screen full
+        summarize
+        ;;
     summarize) summarize ;;
     all)
         preflight
@@ -226,7 +239,7 @@ case "${MODE}" in
         summarize
         ;;
     *)
-        echo "Usage: $0 {preflight|smoke|baseline-all|screen-all|summarize|all}" >&2
+        echo "Usage: $0 {preflight|smoke|baseline-all|screen-all|uavid-main|summarize|all}" >&2
         exit 2
         ;;
 esac

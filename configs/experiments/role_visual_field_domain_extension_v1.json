@@ -20,6 +20,12 @@
       "fine_size": 512,
       "context_size": 896,
       "reference_endpoint": "global"
+    },
+    "uavid": {
+      "source_mode": "image",
+      "fine_size": 640,
+      "context_size": 1280,
+      "reference_endpoint": "global"
     }
   }
 }

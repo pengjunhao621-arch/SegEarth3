@@ -12,8 +12,9 @@ from tools.summarize_joint_role_view import _expected_variants
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATASETS = ('isaid', 'voc20', 'cityscapes')
+DATASETS = ('uavid', 'isaid', 'voc20', 'cityscapes')
 CLASS_FILES = {
+    'uavid': 'cls_uavid.txt',
     'voc20': 'cls_voc20.txt',
     'cityscapes': 'cls_city_scapes.txt',
     'isaid': 'cls_iSAID.txt',

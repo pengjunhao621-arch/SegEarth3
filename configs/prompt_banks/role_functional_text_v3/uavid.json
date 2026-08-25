@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "protocol": "role_functional_text_screen_v1",
+  "dataset": "UAVid",
+  "generator": "Codex; frozen role-functional candidates generated before evaluation from dataset ontology and visual geometry",
+  "frozen_before_evaluation": true,
+  "candidate_semantics": {
+    "presence": [
+      "P1: canonical visual existence or equivalent noun phrase",
+      "P2: multiplicity/area-oriented concept existence"
+    ],
+    "semantic": [
+      "S1: complete dense extent or spatial continuity",
+      "S2: silhouette/surface or coherent region appearance",
+      "S3: dataset-view-specific geometry and visual structure"
+    ],
+    "instance": [
+      "I1: individual object or connected component",
+      "I2: separated/bounded complete object or region"
+    ]
+  },
+  "classes": [
+    {
+      "id": 0,
+      "name": "background",
+      "official_prompts": [
+        "background"
+      ],
+      "presence_candidates": [
+        "visible image background",
+        "non-target urban background"
+      ],
+      "semantic_candidates": [
+        "remaining background pixels",
+        "continuous non-target aerial background",
+        "unclassified overhead background surface"
+      ],
+      "instance_candidates": [
+        "connected background component",
+        "bounded non-target background region"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "building",
+      "official_prompts": [
+        "building"
+      ],
+      "presence_candidates": [
+        "visible buildings",
+        "one or more building structures"
+      ],
+      "semantic_candidates": [
+        "complete building footprint",
+        "rectilinear rooftop surface",
+        "overhead building roofs with sharp boundaries"
+      ],
+      "instance_candidates": [
+        "individual building region",
+        "separate complete building footprint"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "road",
+      "official_prompts": [
+        "road"
+      ],
+      "presence_candidates": [
+        "visible roads",
+        "road network"
+      ],
+      "semantic_candidates": [
+        "continuous drivable road surface",
+        "elongated paved roadway",
+        "overhead connected road network"
+      ],
+      "instance_candidates": [
+        "connected road component",
+        "bounded complete road region"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "car",
+      "official_prompts": [
+        "car"
+      ],
+      "presence_candidates": [
+        "visible cars",
+        "one or more road vehicles"
+      ],
+      "semantic_candidates": [
+        "complete compact car footprint",
+        "rectangular vehicle roof surface",
+        "small overhead vehicle body"
+      ],
+      "instance_candidates": [
+        "individual car",
+        "separate complete vehicle footprint"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "tree",
+      "official_prompts": [
+        "tree"
+      ],
+      "presence_candidates": [
+        "visible trees",
+        "tree canopy cover"
+      ],
+      "semantic_candidates": [
+        "complete tree canopy extent",
+        "coarse-textured tree crowns",
+        "overhead individual and grouped tree canopies"
+      ],
+      "instance_candidates": [
+        "individual tree crown",
+        "separate complete canopy region"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "vegetation",
+      "official_prompts": [
+        "vegetation"
+      ],
+      "presence_candidates": [
+        "visible low vegetation",
+        "vegetation cover"
+      ],
+      "semantic_candidates": [
+        "continuous low-vegetation surface",
+        "fine-textured vegetated ground",
+        "overhead coherent vegetation cover"
+      ],
+      "instance_candidates": [
+        "connected vegetation component",
+        "bounded vegetation patch"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "human",
+      "official_prompts": [
+        "human"
+      ],
+      "presence_candidates": [
+        "visible people",
+        "one or more humans"
+      ],
+      "semantic_candidates": [
+        "complete human figure extent",
+        "small upright human silhouette",
+        "visible pedestrian body"
+      ],
+      "instance_candidates": [
+        "individual person",
+        "separate complete human figure"
+      ]
+    }
+  ]
+}
