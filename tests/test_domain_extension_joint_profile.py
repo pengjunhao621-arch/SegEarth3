@@ -11,6 +11,9 @@ from role_functional_text_definitions import (
 )
 from tools.summarize_joint_role_view import _expected_variants
 from tools.build_sequential_joint_registry import build_registry
+from tools.summarize_isaid_sequential_role_view import (
+    expected_variants as expected_role_only_variants,
+)
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -60,8 +63,6 @@ class DomainExtensionJointProfileTest(unittest.TestCase):
             payload = {
                 'role_candidates': record['role_candidates'],
                 'anchor_candidate': record['anchor_candidate'],
-                'operator_specs': [
-                    {'name': name} for name in JOINT_ROLE_VIEW_OPERATOR_NAMES],
             }
             self.assertEqual(
                 len(_expected_variants(payload)),
@@ -77,7 +78,7 @@ class DomainExtensionJointProfileTest(unittest.TestCase):
             'anchor_candidate': source['anchor_candidate'],
             'operator_specs': [{'name': 'global'}],
         }
-        self.assertEqual(len(_expected_variants(payload)), 37)
+        self.assertEqual(len(expected_role_only_variants(payload)), 37)
 
         summary = {'profiles': [
             dict(dataset='isaid', profile='official', candidate_id='anchor',

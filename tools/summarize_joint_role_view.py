@@ -39,22 +39,16 @@ def parse_args():
 def _expected_variants(payload):
     candidates = payload['role_candidates']
     anchor = payload['anchor_candidate']
-    operators = tuple(
-        str(value['name']) for value in payload['operator_specs'])
-    if (not operators or len(operators) != len(set(operators))
-            or any(value not in JOINT_ROLE_VIEW_OPERATOR_NAMES
-                   for value in operators)):
-        raise ValueError('Invalid Joint Role--View operator subset.')
     names = ['jrv_official']
     names.extend(
         f'jrv_anchor__{operator}'
-        for operator in operators)
+        for operator in JOINT_ROLE_VIEW_OPERATOR_NAMES)
     for candidate in candidates:
         if candidate['id'] == anchor:
             continue
         names.extend(
             f'jrv_{candidate["id"]}__{operator}'
-            for operator in operators)
+            for operator in JOINT_ROLE_VIEW_OPERATOR_NAMES)
     return tuple(names)
 
 
@@ -151,8 +145,6 @@ def summarize(records):
             prior_view_miou=first['prior_view_miou'],
             operator_specs=first['operator_specs'],
         )
-        operator_names = tuple(
-            str(value['name']) for value in contract['operator_specs'])
         for record in values:
             payload = record['joint_role_view']
             for key, expected in contract.items():
@@ -219,10 +211,10 @@ def summarize(records):
 
         anchor_names = [
             _variant_name(anchor, operator, anchor)
-            for operator in operator_names]
+            for operator in JOINT_ROLE_VIEW_OPERATOR_NAMES]
         current_names = [
             _variant_name(current, operator, anchor)
-            for operator in operator_names]
+            for operator in JOINT_ROLE_VIEW_OPERATOR_NAMES]
         role_names = [
             _variant_name(candidate['id'], endpoint, anchor)
             for candidate in contract['role_candidates']
@@ -289,14 +281,14 @@ def summarize(records):
 
         anchor_operator_metrics = {
             operator: metrics[_variant_name(anchor, operator, anchor)]
-            for operator in operator_names}
+            for operator in JOINT_ROLE_VIEW_OPERATOR_NAMES}
         for candidate in contract['role_candidates']:
             identifier = candidate['id']
             if identifier == anchor:
                 continue
             candidate_role = metrics[_variant_name(
                 identifier, endpoint, anchor)]['miou']
-            for operator in operator_names:
+            for operator in JOINT_ROLE_VIEW_OPERATOR_NAMES:
                 name = _variant_name(identifier, operator, anchor)
                 interaction_rows.append(dict(
                     dataset=dataset,
@@ -317,8 +309,6 @@ def summarize(records):
                 ))
 
         for candidate, matrix in oracle_matrices.items():
-            if 'local' not in operator_names or 'global' not in operator_names:
-                continue
             local_name = _variant_name(candidate, 'local', anchor)
             global_name = _variant_name(candidate, 'global', anchor)
             local_metric = metrics[local_name]
@@ -352,22 +342,16 @@ def summarize(records):
             sequential=sequential_name,
             current_best_view=current_best_view_name,
             joint=joint_name,
-            operators=operator_names,
         )
 
     operator_rows = []
     datasets = sorted(dataset_payloads)
-    available_operators = sorted(set(
-        operator for payload in dataset_payloads.values()
-        for operator in payload['operators']))
-    for operator in available_operators:
+    for operator in JOINT_ROLE_VIEW_OPERATOR_NAMES:
         current_values, best_role_values = [], []
         positive_current = positive_best = 0
         selected_candidates = []
         for dataset in datasets:
             payload = dataset_payloads[dataset]
-            if operator not in payload['operators']:
-                continue
             metrics, rows = payload['metrics'], payload['rows']
             current_name = _variant_name(
                 payload['current'], operator, payload['anchor'])
@@ -388,7 +372,7 @@ def summarize(records):
                 f'{dataset}:{rows[best_name]["candidate_id"]}')
         operator_rows.append(dict(
             operator=operator,
-            datasets=len(current_values),
+            datasets=len(datasets),
             current_role_macro=sum(current_values) / len(current_values),
             current_role_positive_vs_role_only=positive_current,
             best_role_macro=sum(best_role_values) / len(best_role_values),
