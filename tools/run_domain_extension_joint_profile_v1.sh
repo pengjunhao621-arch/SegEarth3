@@ -239,6 +239,7 @@ case "${MODE}" in
     isaid-role-only-smoke)
         DATASETS="isaid"
         preflight
+        collect_baseline smoke
         collect_screen smoke True "${SOURCE_REGISTRY}"
         summarize
         ;;
@@ -264,6 +265,7 @@ case "${MODE}" in
             exit 2
         fi
         preflight
+        collect_baseline smoke
         collect_screen smoke False "${SELECTED_REGISTRY}"
         summarize
         ;;
