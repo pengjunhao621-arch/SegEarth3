@@ -16,8 +16,11 @@ CONFIG="configs/cfg_iSAID.py"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:128}"
 
 preflight() {
-    "${PYTHON_BIN}" -m unittest \
-        tests.test_isaid_sequential_role_view
+    # Discover the file without importing ``tests.*``. Some server
+    # environments install an unrelated top-level ``tests`` package, which
+    # shadows this repository's non-package tests directory.
+    "${PYTHON_BIN}" -m unittest discover \
+        -s tests -p 'test_isaid_sequential_role_view.py'
     if [[ ! -d "${ISAID_ROOT}/img_dir/val" \
             || ! -d "${ISAID_ROOT}/ann_dir/val" ]]; then
         echo "Invalid iSAID layout: ${ISAID_ROOT}" >&2
