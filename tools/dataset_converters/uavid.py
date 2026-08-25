@@ -9,7 +9,7 @@ saved as mode-L uint8 masks because Pillow 11.3 corrupts the original
 
 import argparse
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Set, Tuple
 
 import numpy as np
 from PIL import Image
@@ -65,26 +65,27 @@ def pad(array: np.ndarray, height: int, width: int, value: int) -> np.ndarray:
     return output
 
 
-def rgb_to_train_ids(rgb: np.ndarray, path: Path) -> np.ndarray:
-    packed = (
+def pack_rgb(rgb: np.ndarray) -> np.ndarray:
+    return (
         rgb[..., 0].astype(np.uint32) << 16
         | rgb[..., 1].astype(np.uint32) << 8
         | rgb[..., 2].astype(np.uint32)
     )
-    labels = np.full(packed.shape, 255, dtype=np.uint8)
+
+
+def rgb_to_train_ids(rgb: np.ndarray) -> np.ndarray:
+    """Match the official converter, including unknown-color handling.
+
+    The official SegEarth converter initializes its output to class 0 and only
+    overwrites pixels matching the eight UAVid colors.  Unknown source colors
+    consequently remain background; the preflight scan below reports them.
+    """
+    packed = pack_rgb(rgb)
+    labels = np.zeros(packed.shape, dtype=np.uint8)
     for label_id, (red, green, blue) in UAVID_PALETTE.items():
         color = (red << 16) | (green << 8) | blue
         train_id = 3 if label_id == 7 else label_id
         labels[packed == color] = train_id
-    if np.any(labels == 255):
-        colors = np.unique(packed[labels == 255])[:10]
-        decoded = [
-            ((int(c) >> 16) & 255, (int(c) >> 8) & 255, int(c) & 255)
-            for c in colors
-        ]
-        raise ValueError(
-            f'{path} contains colors outside the official UAVid palette: '
-            f'{decoded}')
     return labels
 
 
@@ -104,6 +105,37 @@ def find_broken_pngs(paths: Iterable[Path]) -> List[Tuple[Path, str]]:
         except (OSError, SyntaxError, ValueError) as error:
             broken.append((path, f'{type(error).__name__}: {error}'))
     return broken
+
+
+def decode_packed_color(color: int) -> Tuple[int, int, int]:
+    return (
+        (int(color) >> 16) & 255,
+        (int(color) >> 8) & 255,
+        int(color) & 255,
+    )
+
+
+def scan_unknown_label_colors(
+        paths: Iterable[Path]
+) -> Tuple[Dict[Tuple[int, int, int], int],
+           Dict[Tuple[int, int, int], Set[Path]]]:
+    known = {
+        (red << 16) | (green << 8) | blue
+        for red, green, blue in UAVID_PALETTE.values()
+    }
+    pixel_counts: Dict[Tuple[int, int, int], int] = {}
+    source_files: Dict[Tuple[int, int, int], Set[Path]] = {}
+    for path in paths:
+        with Image.open(path) as label:
+            packed = pack_rgb(np.asarray(label.convert('RGB')))
+        colors, counts = np.unique(packed, return_counts=True)
+        for color, count in zip(colors.tolist(), counts.tolist()):
+            if color in known:
+                continue
+            decoded = decode_packed_color(color)
+            pixel_counts[decoded] = pixel_counts.get(decoded, 0) + int(count)
+            source_files.setdefault(decoded, set()).add(path)
+    return pixel_counts, source_files
 
 
 def main() -> int:
@@ -144,6 +176,19 @@ def main() -> int:
             f'{details}\nRe-extract or re-download only the listed source files.')
     print(f'PASSED: fully decoded {len(image_sources)} images and '
           f'{len(label_sources)} labels.')
+    unknown_counts, unknown_files = scan_unknown_label_colors(label_sources)
+    if unknown_counts:
+        print('WARNING: source labels contain colors outside the official '
+              'eight-color UAVid palette.')
+        print('Matching the official SegEarth converter, these pixels will '
+              'be mapped to class 0 (background):')
+        for color in sorted(unknown_counts):
+            examples = sorted(str(path) for path in unknown_files[color])[:3]
+            print(
+                f'  color={color}, pixels={unknown_counts[color]}, '
+                f'files={len(unknown_files[color])}, examples={examples}')
+    else:
+        print('PASSED: all label pixels use the official UAVid palette.')
     if args.check_only:
         return 0
 
@@ -170,7 +215,7 @@ def main() -> int:
         try:
             with Image.open(label_path) as label:
                 label_array = rgb_to_train_ids(
-                    np.asarray(label.convert('RGB')), label_path)
+                    np.asarray(label.convert('RGB')))
         except (OSError, SyntaxError, ValueError) as error:
             raise RuntimeError(
                 f'Failed to decode source label: {label_path}') from error
