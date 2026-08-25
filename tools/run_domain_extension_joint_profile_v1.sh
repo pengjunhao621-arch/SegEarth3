@@ -17,7 +17,7 @@ config_for() {
     case "$1" in
         voc20) echo "configs/cfg_voc20.py" ;;
         cityscapes) echo "configs/cfg_city_scapes.py" ;;
-        isaid) echo "configs/cfg_isaid.py" ;;
+        isaid) echo "configs/cfg_iSAID.py" ;;
         uavid) echo "configs/cfg_uavid.py" ;;
         *) echo "Unknown dataset: $1" >&2; return 2 ;;
     esac
