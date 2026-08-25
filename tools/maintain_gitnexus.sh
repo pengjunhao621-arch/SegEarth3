@@ -4,7 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-if command -v gitnexus >/dev/null 2>&1; then
+if [[ -f ".gitnexus/run.cjs" ]] && command -v node >/dev/null 2>&1; then
+  # Keep the analyzer and the on-disk index on the same project-local runtime.
+  # Mixing a global CLI/npx version with .gitnexus/run.cjs was the source of
+  # repeated stale metadata and FTS schema mismatches on this repository.
+  GITNEXUS=(node .gitnexus/run.cjs)
+elif command -v gitnexus >/dev/null 2>&1; then
   GITNEXUS=(gitnexus)
 elif command -v npx >/dev/null 2>&1; then
   GITNEXUS=(npx gitnexus)
@@ -29,14 +34,17 @@ case "${MODE}" in
     fi
     "${GITNEXUS[@]}" status
     ;;
-  refresh)
-    "${GITNEXUS[@]}" "${ANALYZE_ARGS[@]}"
-    ;;
-  force)
+  refresh|force)
+    # A full rebuild is deterministic and repairs Ladybug/FTS inconsistencies.
+    # Small edits are already allowed to defer refresh by AGENTS.md, so this
+    # reliable default does not run on every tiny change.
     "${GITNEXUS[@]}" "${ANALYZE_ARGS[@]}" --force
     ;;
+  incremental)
+    "${GITNEXUS[@]}" "${ANALYZE_ARGS[@]}"
+    ;;
   *)
-    echo "Usage: $0 {status|refresh|force}" >&2
+    echo "Usage: $0 {status|refresh|force|incremental}" >&2
     exit 64
     ;;
 esac
