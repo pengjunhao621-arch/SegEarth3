@@ -11,6 +11,8 @@ DATA_HOME="${DATA_HOME:-/home/PengJunhao/workspace/data}"
 SMOKE_SAMPLES="${SMOKE_SAMPLES:-1}"
 INTEGRITY_TOLERANCE="${INTEGRITY_TOLERANCE:-1e-5}"
 BASELINE_TOLERANCE="${BASELINE_TOLERANCE:-0.05}"
+SOURCE_REGISTRY="${SOURCE_REGISTRY:-configs/experiments/joint_role_view_domain_extension_v1.json}"
+SELECTED_REGISTRY="${SELECTED_REGISTRY:-}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:128}"
 
 config_for() {
@@ -154,6 +156,8 @@ collect_baseline() {
 
 collect_screen() {
     local scope="$1"
+    local role_only="${2:-False}"
+    local registry="${3:-${SOURCE_REGISTRY}}"
     local dataset config data_root out_dir existing
     for dataset in ${DATASETS}; do
         config="$(config_for "${dataset}")"
@@ -178,7 +182,8 @@ collect_screen() {
             model.role_prompt_tta_visual_field_diagnosis=True
             model.role_prompt_tta_visual_field_registry="configs/experiments/role_visual_field_domain_extension_v1.json"
             model.role_prompt_tta_visual_field_mode=joint_role_view
-            model.role_prompt_tta_joint_profile_registry="configs/experiments/joint_role_view_domain_extension_v1.json"
+            model.role_prompt_tta_joint_profile_registry="${registry}"
+            model.role_prompt_tta_joint_role_only="${role_only}"
             model.role_prompt_tta_stats_path="${out_dir}/screen.jsonl"
             model.role_prompt_tta_primary_variant=baseline
             model.role_prompt_tta_strict_integrity=True
@@ -231,6 +236,47 @@ case "${MODE}" in
         collect_screen full
         summarize
         ;;
+    isaid-role-only-smoke)
+        DATASETS="isaid"
+        preflight
+        collect_screen smoke True "${SOURCE_REGISTRY}"
+        summarize
+        ;;
+    isaid-role-only)
+        DATASETS="isaid"
+        preflight
+        collect_screen full True "${SOURCE_REGISTRY}"
+        summarize
+        ;;
+    isaid-select-role)
+        DATASETS="isaid"
+        SELECTED_REGISTRY="${SELECTED_REGISTRY:-${ROOT}/summary/isaid_selected_joint_registry.json}"
+        "${PYTHON_BIN}" tools/build_sequential_joint_registry.py \
+            --summary "${ROOT}/summary/summary.json" \
+            --source-registry "${SOURCE_REGISTRY}" \
+            --dataset isaid \
+            --output "${SELECTED_REGISTRY}"
+        ;;
+    isaid-joint-selected-smoke)
+        DATASETS="isaid"
+        if [[ -z "${SELECTED_REGISTRY}" || ! -f "${SELECTED_REGISTRY}" ]]; then
+            echo "Set SELECTED_REGISTRY to the generated iSAID registry." >&2
+            exit 2
+        fi
+        preflight
+        collect_screen smoke False "${SELECTED_REGISTRY}"
+        summarize
+        ;;
+    isaid-joint-selected)
+        DATASETS="isaid"
+        if [[ -z "${SELECTED_REGISTRY}" || ! -f "${SELECTED_REGISTRY}" ]]; then
+            echo "Set SELECTED_REGISTRY to the generated iSAID registry." >&2
+            exit 2
+        fi
+        preflight
+        collect_screen full False "${SELECTED_REGISTRY}"
+        summarize
+        ;;
     summarize) summarize ;;
     all)
         preflight
@@ -239,7 +285,7 @@ case "${MODE}" in
         summarize
         ;;
     *)
-        echo "Usage: $0 {preflight|smoke|baseline-all|screen-all|uavid-main|summarize|all}" >&2
+        echo "Usage: $0 {preflight|smoke|baseline-all|screen-all|uavid-main|isaid-role-only-smoke|isaid-role-only|isaid-select-role|isaid-joint-selected-smoke|isaid-joint-selected|summarize|all}" >&2
         exit 2
         ;;
 esac

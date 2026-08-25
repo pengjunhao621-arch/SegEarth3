@@ -54,6 +54,7 @@ class SegEarthOV3Segmentation(
             role_prompt_tta_visual_field_diagnosis=False,
             role_prompt_tta_visual_field_registry=None,
             role_prompt_tta_visual_field_mode='joint_role_view_final',
+            role_prompt_tta_joint_role_only=False,
             role_prompt_tta_joint_profile_registry=None,
             role_prompt_tta_joint_final_registry=None,
             role_prompt_tta_final_profile='audit',
@@ -131,6 +132,8 @@ class SegEarthOV3Segmentation(
                 role_prompt_tta_visual_field_registry),
             role_prompt_tta_visual_field_mode=(
                 role_prompt_tta_visual_field_mode),
+            role_prompt_tta_joint_role_only=(
+                role_prompt_tta_joint_role_only),
             role_prompt_tta_joint_profile_registry=(
                 role_prompt_tta_joint_profile_registry),
             role_prompt_tta_joint_final_registry=(

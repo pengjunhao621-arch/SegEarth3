@@ -48,7 +48,10 @@ class JointRoleViewTest(unittest.TestCase):
                     id=candidate['id'], slots=list(candidate['slots']),
                     admission=candidate['admission'])
                     for candidate in value['role_candidates']],
-                anchor_candidate=value['anchor_candidate'])
+                anchor_candidate=value['anchor_candidate'],
+                operator_specs=[
+                    {'name': name}
+                    for name in JOINT_ROLE_VIEW_OPERATOR_NAMES])
             names = _expected_variants(payload)
             self.assertEqual(len(names), len(set(names)))
             self.assertEqual(
@@ -120,6 +123,65 @@ class JointRoleViewTest(unittest.TestCase):
         self.assertEqual(len(result['reproduction']), 1)
         self.assertAlmostEqual(
             result['reproduction'][0]['reference_identity_max_abs'], 0.0)
+
+    def test_role_only_summary_accepts_global_operator_subset(self):
+        candidates = [
+            dict(id='anchor', slots=[0, 0, 0], admission='native',
+                 source_miou=None),
+            dict(id='selected', slots=[1, 2, 1], admission='native',
+                 source_miou=None),
+        ]
+        operator_specs = [dict(
+            name='global', family='endpoint', global_weight=1.0, rho=None)]
+        variants = {
+            'jrv_official': dict(
+                candidate_id='anchor', slots=[0, 0, 0],
+                admission='native', operator='global',
+                operator_family='reference', global_weight=1.0, rho=None,
+                confusion=dict(matrix=[[5, 1], [1, 5]]),
+                changed_pixels=0, improved_pixels=0, harmed_pixels=0,
+                help_minus_harm=0),
+            'jrv_anchor__global': dict(
+                candidate_id='anchor', slots=[0, 0, 0],
+                admission='native', operator='global',
+                operator_family='endpoint', global_weight=1.0, rho=None,
+                confusion=dict(matrix=[[5, 1], [1, 5]]),
+                changed_pixels=0, improved_pixels=0, harmed_pixels=0,
+                help_minus_harm=0),
+            'jrv_selected__global': dict(
+                candidate_id='selected', slots=[1, 2, 1],
+                admission='native', operator='global',
+                operator_family='endpoint', global_weight=1.0, rho=None,
+                confusion=dict(matrix=[[6, 0], [1, 5]]),
+                changed_pixels=1, improved_pixels=1, harmed_pixels=0,
+                help_minus_harm=1),
+        }
+        payload = dict(
+            schema_version=1, protocol='joint_role_view_profile_v1',
+            global_source='official_observation', reference_endpoint='global',
+            role_candidates=candidates, anchor_candidate='anchor',
+            current_role_candidate='anchor', prior_view_operator='global',
+            prior_view_miou=None, reference_identity_max_abs=0.0,
+            native_prompt_parity_max_abs=0.0,
+            operator_specs=operator_specs, variants=variants,
+            complementarity={
+                candidate['id']: dict(
+                    local_only_correct_pixels=0,
+                    global_only_correct_pixels=0,
+                    disagreement_pixels=0,
+                    oracle_confusion=dict(matrix=[[5, 1], [1, 5]]))
+                for candidate in candidates},
+        )
+        result = summarize([dict(
+            dataset_name='isaid', img_path='tile.png',
+            class_names=['background', 'target'],
+            joint_role_view=payload)])
+        profiles = {row['profile']: row for row in result['profiles']}
+        self.assertEqual(profiles['role_only_best']['candidate_id'], 'selected')
+        self.assertEqual(profiles['joint_role_view_best']['operator'], 'global')
+        self.assertEqual(result['complementarity'], [])
+        self.assertEqual([row['operator'] for row in result['operators']], [
+            'global'])
 
 
 if __name__ == '__main__':

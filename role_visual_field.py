@@ -62,6 +62,7 @@ class RoleVisualFieldMixin:
             self, role_prompt_tta_visual_field_diagnosis=False,
             role_prompt_tta_visual_field_registry=None,
             role_prompt_tta_visual_field_mode='joint_role_view_final',
+            role_prompt_tta_joint_role_only=False,
             role_prompt_tta_joint_profile_registry=None,
             role_prompt_tta_joint_final_registry=None,
             role_prompt_tta_final_profile='audit'):
@@ -71,6 +72,8 @@ class RoleVisualFieldMixin:
             role_prompt_tta_visual_field_registry)
         self.role_prompt_tta_visual_field_mode = str(
             role_prompt_tta_visual_field_mode)
+        self.role_prompt_tta_joint_role_only = bool(
+            role_prompt_tta_joint_role_only)
         self._rvf_config = None
         self._jrv_config = None
         self._jrv_final_config = None
@@ -976,6 +979,54 @@ class RoleVisualFieldMixin:
     def _jrv_predict_image(self, image, image_path):
         """Build the shared Local/Global evidence bank for joint profiling."""
         candidates = self._jrv_config['role_candidates']
+        if self.role_prompt_tta_joint_role_only:
+            result = self._jrv_accumulate_official_units(image, candidates)
+            official_query, official, roles, _, cost = result
+            endpoints = dict(local=official, global_value=official)
+            bundle = dict(
+                joint_role_view=True,
+                anchor=endpoints,
+                roles=OrderedDict(
+                    (candidate['id'], dict(
+                        local=roles[candidate['id']],
+                        global_value=roles[candidate['id']]))
+                    for candidate in candidates),
+            )
+            global_operator = next(
+                value for value in JRV_OPERATOR_SPECS
+                if value[0] == 'global')
+            metadata = dict(
+                schema_version=JRV_SCHEMA_VERSION,
+                protocol=JRV_PROTOCOL,
+                execution='role_only',
+                global_source='official_observation',
+                reference_endpoint='global',
+                operator_specs=[dict(
+                    name=global_operator[0], family=global_operator[1],
+                    global_weight=float(global_operator[2]),
+                    rho=global_operator[3])],
+                role_candidates=[dict(
+                    id=value['id'], slots=list(value['slots']),
+                    admission=value['admission'],
+                    source_miou=value['source_miou'])
+                    for value in candidates],
+                anchor_candidate=self._jrv_config['anchor_candidate'],
+                current_role_candidate=self._jrv_config[
+                    'current_role_candidate'],
+                prior_view_operator='global',
+                prior_view_miou=self._jrv_config['prior_view_miou'],
+                local_size=int(self._rvf_config['fine_size']),
+                context_size=int(self._rvf_config['context_size']),
+                source_mode=self._rvf_config['source_mode'],
+                reference_identity_max_abs=0.0,
+                native_prompt_parity_max_abs=float(
+                    self._rpt_native_parity_max_abs or 0.0),
+                cost=dict(cost),
+                units=[],
+                unique_context_views=0,
+            )
+            return official_query.to(self.device), bundle, metadata
+
         global_source = self._jrv_global_source(image)
         unit_values = self._jrv_accumulate_visual_units(
             image, image_path, need_context=(global_source == 'aligned_context'),
