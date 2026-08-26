@@ -1,5 +1,6 @@
 import unittest
 
+from tools.plan_isaid_resume import plan_resume
 from tools.summarize_isaid_sequential_role_view import (
     expected_variants,
     summarize,
@@ -7,6 +8,15 @@ from tools.summarize_isaid_sequential_role_view import (
 
 
 class ISAIDSequentialRoleViewTest(unittest.TestCase):
+
+    def test_resume_starts_at_first_missing_and_allows_overlap(self):
+        images = [f'/data/tile_{index}.png' for index in range(6)]
+        result = plan_resume(
+            images, {images[0], images[1], images[2], images[4]})
+        self.assertEqual(result['first_missing_index'], 3)
+        self.assertEqual(result['resume_tail_images'], 3)
+        self.assertEqual(result['dataset_indices'], -3)
+        self.assertEqual(result['expected_overlap'], 1)
 
     def test_global_only_role_summary_selects_best_non_anchor(self):
         candidates = [

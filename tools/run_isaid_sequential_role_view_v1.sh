@@ -12,6 +12,11 @@ INTEGRITY_TOLERANCE="${INTEGRITY_TOLERANCE:-1e-5}"
 BASELINE_TOLERANCE="${BASELINE_TOLERANCE:-0.05}"
 SOURCE_REGISTRY="${SOURCE_REGISTRY:-configs/experiments/joint_role_view_domain_extension_v1.json}"
 SELECTED_REGISTRY="${SELECTED_REGISTRY:-}"
+RUN_SHARD="${RUN_SHARD:-isaid}"
+DATASET_INDICES="${DATASET_INDICES:-}"
+TORCHRUN_MODE="${TORCHRUN_MODE:-standalone}"
+TORCHRUN_MASTER_ADDR="${TORCHRUN_MASTER_ADDR:-127.0.0.1}"
+TORCHRUN_MASTER_PORT="${TORCHRUN_MASTER_PORT:-29642}"
 CONFIG="configs/cfg_iSAID.py"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:128}"
 
@@ -37,13 +42,26 @@ run_eval() {
     shift
     mkdir -p "${out_dir}"
     if [[ "${NPROC}" -gt 1 ]]; then
-        CUDA_VISIBLE_DEVICES="${GPU_LIST}" \
-            torchrun --standalone --nproc_per_node="${NPROC}" \
-            eval.py "${CONFIG}" \
-            --launcher pytorch \
-            --work-dir "${out_dir}/work" \
-            --result-file "${out_dir}/results.json" \
-            "$@"
+        if [[ "${TORCHRUN_MODE}" == "static" ]]; then
+            CUDA_VISIBLE_DEVICES="${GPU_LIST}" \
+                torchrun --nnodes=1 --node_rank=0 \
+                --master_addr="${TORCHRUN_MASTER_ADDR}" \
+                --master_port="${TORCHRUN_MASTER_PORT}" \
+                --nproc_per_node="${NPROC}" \
+                eval.py "${CONFIG}" \
+                --launcher pytorch \
+                --work-dir "${out_dir}/work" \
+                --result-file "${out_dir}/results.json" \
+                "$@"
+        else
+            CUDA_VISIBLE_DEVICES="${GPU_LIST}" \
+                torchrun --standalone --nproc_per_node="${NPROC}" \
+                eval.py "${CONFIG}" \
+                --launcher pytorch \
+                --work-dir "${out_dir}/work" \
+                --result-file "${out_dir}/results.json" \
+                "$@"
+        fi
     else
         CUDA_VISIBLE_DEVICES="${GPU_LIST}" \
             "${PYTHON_BIN}" eval.py "${CONFIG}" \
@@ -57,7 +75,11 @@ collect() {
     local scope="$1"
     local role_only="$2"
     local registry="$3"
-    local out_dir="${ROOT}/screen/isaid"
+    local phase_dir="joint"
+    if [[ "${role_only}" == "True" ]]; then
+        phase_dir="screen"
+    fi
+    local out_dir="${ROOT}/${phase_dir}/${RUN_SHARD}"
     local existing
     mkdir -p "${out_dir}"
     existing="$(find "${out_dir}" -maxdepth 1 \
@@ -87,20 +109,50 @@ collect() {
     )
     if [[ "${scope}" == "smoke" ]]; then
         options+=(test_dataloader.dataset.indices="${SMOKE_SAMPLES}")
+    elif [[ -n "${DATASET_INDICES}" ]]; then
+        options+=(test_dataloader.dataset.indices="${DATASET_INDICES}")
     fi
     echo "[iSAID sequential ${MODE}] -> ${out_dir}"
     run_eval "${out_dir}" --cfg-options "${options[@]}"
 }
 
-screen_inputs() {
-    find "${ROOT}/screen/isaid" -maxdepth 1 \
+role_inputs() {
+    [[ -d "${ROOT}/screen" ]] || return 0
+    find "${ROOT}/screen" -mindepth 2 -maxdepth 2 \
         -name 'screen.rank*.jsonl' -type f | sort
+}
+
+joint_inputs() {
+    [[ -d "${ROOT}/joint" ]] || return 0
+    find "${ROOT}/joint" -mindepth 2 -maxdepth 2 \
+        -name 'screen.rank*.jsonl' -type f | sort
+}
+
+plan_resume() {
+    local inputs=()
+    local path
+    while IFS= read -r path; do inputs+=("${path}"); done < <(role_inputs)
+    if [[ "${#inputs[@]}" -eq 0 ]]; then
+        echo "No partial iSAID Role records found under ${ROOT}." >&2
+        exit 2
+    fi
+    mkdir -p "${ROOT}/summary"
+    "${PYTHON_BIN}" tools/plan_isaid_resume.py \
+        --image-dir "${ISAID_ROOT}/img_dir/val" \
+        --inputs "${inputs[@]}" \
+        --output "${ROOT}/summary/isaid_resume_plan.json"
+}
+
+resume_indices() {
+    "${PYTHON_BIN}" -c \
+        'import json,sys; value=json.load(open(sys.argv[1]))["dataset_indices"]; print("" if value is None else value)' \
+        "${ROOT}/summary/isaid_resume_plan.json"
 }
 
 summarize_role() {
     local inputs=()
     local path
-    while IFS= read -r path; do inputs+=("${path}"); done < <(screen_inputs)
+    while IFS= read -r path; do inputs+=("${path}"); done < <(role_inputs)
     if [[ "${#inputs[@]}" -eq 0 ]]; then
         echo "No iSAID Role-only records found under ${ROOT}." >&2
         exit 2
@@ -116,7 +168,7 @@ summarize_joint() {
     local full_report="$1"
     local inputs=()
     local path
-    while IFS= read -r path; do inputs+=("${path}"); done < <(screen_inputs)
+    while IFS= read -r path; do inputs+=("${path}"); done < <(joint_inputs)
     if [[ "${#inputs[@]}" -eq 0 ]]; then
         echo "No iSAID selected-Joint records found under ${ROOT}." >&2
         exit 2
@@ -153,6 +205,29 @@ case "${MODE}" in
         collect full True "${SOURCE_REGISTRY}"
         summarize_role
         ;;
+    plan-resume) plan_resume ;;
+    role-resume)
+        preflight
+        plan_resume
+        DATASET_INDICES="$(resume_indices)"
+        if [[ -z "${DATASET_INDICES}" ]]; then
+            echo "iSAID Role screen is already complete."
+            summarize_role
+            exit 0
+        fi
+        if [[ "${RUN_SHARD}" == "isaid" ]]; then
+            RUN_SHARD="isaid_resume_$(date +%Y%m%d_%H%M%S)"
+        fi
+        echo "Resuming iSAID with dataset.indices=${DATASET_INDICES} " \
+             "into shard ${RUN_SHARD}."
+        collect full True "${SOURCE_REGISTRY}"
+        plan_resume
+        if [[ -n "$(resume_indices)" ]]; then
+            echo "iSAID resume is still incomplete; inspect the new plan." >&2
+            exit 2
+        fi
+        summarize_role
+        ;;
     summarize-role) summarize_role ;;
     select)
         SELECTED_REGISTRY="${SELECTED_REGISTRY:-${ROOT}/summary/isaid_selected_joint_registry.json}"
@@ -176,7 +251,7 @@ case "${MODE}" in
         ;;
     summarize-joint) summarize_joint True ;;
     *)
-        echo "Usage: $0 {preflight|role-smoke|role|summarize-role|select|joint-smoke|joint|summarize-joint}" >&2
+        echo "Usage: $0 {preflight|role-smoke|role|plan-resume|role-resume|summarize-role|select|joint-smoke|joint|summarize-joint}" >&2
         exit 2
         ;;
 esac
