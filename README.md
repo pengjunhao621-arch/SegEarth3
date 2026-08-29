@@ -5,7 +5,7 @@
 <!-- <h3></h3> -->
 
 <div>
-    <strong>Adapting SAM 3 for remote sensing open-vocabulary semantic segmentation, change detection, and 3D semantic segmentation</strong>
+    <strong>Local research branch for training-free open-vocabulary semantic segmentation with SAM 3</strong>
 </div>
 
 <div>
@@ -40,7 +40,11 @@
 
 ## Local Research Direction
 
-This local workspace keeps the official SegEarth-OV3 baseline reproducible, but the follow-up research direction is now problem-driven rather than strictly training-free. The central constraint remains remote-sensing open-vocabulary semantic segmentation: SAM3 and the official inference pipeline are treated as the foundation, while later modules may be training-free, lightly calibrated, or learned if they directly address a verified failure mode and preserve a clean comparison to the official baseline.
+This local workspace keeps the official SegEarth-OV3 2D baseline reproducible
+and focuses on training-free open-vocabulary semantic segmentation. SAM3 and
+the official inference pipeline remain the protected foundation; research
+extensions are configuration-gated and preserve a clean comparison to the
+official baseline.
 
 The retained method has two stages. `role_functional_text_screen_v1` tests
 whether SAM3's Presence, semantic and instance roles benefit from different
@@ -49,8 +53,9 @@ anchor. `joint_role_view_profile_v1` then couples the selected Role profile
 with aligned Local/Context observations, and `joint_role_view_final_v1`
 performs the final residual-versus-direct and accuracy-versus-efficiency
 comparison. All paths are configuration-gated; the unmodified official
-baseline remains the default. Evaluation uses UDD5, VDD, Vaihingen, Potsdam,
-OpenEarthMap and LoveDA. iSAID is excluded while the local copy is incomplete.
+baseline remains the default. The verified remote-sensing evaluation includes
+UDD5, VDD, Vaihingen, Potsdam, OpenEarthMap, LoveDA, UAVid and iSAID. VOC20 and
+Cityscapes are retained as natural-image extension datasets.
 
 ## Abstract
 > *Most existing methods for training-free open-vocabulary semantic segmentation are based on CLIP. While these approaches have made progress, they often face challenges in precise localization or require complex pipelines to combine separate modules, especially in remote sensing scenarios where numerous dense and small targets are present. Recently, Segment Anything Model 3 (SAM 3) was proposed, unifying segmentation and recognition in a promptable framework. In this paper, we present a comprehensive exploration of applying SAM 3 to the remote sensing open-vocabulary tasks (\textit{i.e.}, 2D semantic segmentation, change detection, and 3D semantic segmentation) without any training. First, we implement a mask fusion strategy that combines the outputs from SAM 3's semantic segmentation head and the Transformer decoder (instance head). This allows us to leverage the strengths of both heads for better land coverage. Second, we utilize the presence score from the presence head to filter out categories that do not exist in the scene, reducing false positives caused by the vast vocabulary sizes and patch-level processing in geospatial scenes. Furthermore, we extend our method to open-vocabulary change detection by a joint instance- and pixel-level verification strategy built directly upon our fused logits. We evaluate our method on extensive remote sensing datasets and tasks, including 20 segmentation datasets, 3 change detection datasets, and a 3D segmentation dataset. Experiments show that our method achieves promising performance, demonstrating the potential of SAM 3 for remote sensing open-vocabulary tasks.*
@@ -63,14 +68,13 @@ You only need to focus on installing mmcv and mmsegmentation correctly; other de
 We include the following dataset configurations in this repo: 
 1) `Semantic Segmentation`: OpenEarthMap, LoveDA, iSAID, Potsdam, Vaihingen, UAVid<sup>img</sup>, UDD5, VDD
 2) `Building Extraction`: WHU<sup>Aerial</sup>, WHU<sup>Sat.Ⅱ</sup>, Inria, xBD<sup>pre</sup>
-4) `Road Extraction`: CHN6-CUG, DeepGlobe, Massachusetts, SpaceNet
-5) `Water Extraction`: WBS-SI
-6) `Gaofen Series Data`: GID, GF-7 Building Dataset, Low-Grade Road Dataset
-7) `Change Detection`: LEVIR-CD, WHU-CD, S2Looking
-8) `3D Segmentation`: STPLS3D (WMSC)
+3) `Road Extraction`: CHN6-CUG, DeepGlobe, Massachusetts, SpaceNet
+4) `Water Extraction`: WBS-SI
+5) `Gaofen Series Data`: GID, GF-7 Building Dataset, Low-Grade Road Dataset
+6) `Change Detection`: LEVIR-CD, WHU-CD, S2Looking
 
-For 1) - 4), please refer to [SegEarth-OV/dataset_prepare.md](https://github.com/likyoo/SegEarth-OV/blob/main/dataset_prepare.md) for dataset preparation.  
-For 6) - 8). please refer to [dataset_prepare.md](dataset_prepare.md) for dataset preparation.
+For 1) - 3), please refer to [SegEarth-OV/dataset_prepare.md](https://github.com/likyoo/SegEarth-OV/blob/main/dataset_prepare.md) for dataset preparation.
+For 5) - 6), please refer to [dataset_prepare.md](dataset_prepare.md) for dataset preparation.
 
 ## Download checkpoints of SAM 3
 

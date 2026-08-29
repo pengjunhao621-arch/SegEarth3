@@ -44,13 +44,6 @@ upgrade the remote server.
   errors as a known environment risk if they appear.
 - Triton 3.4.0 is present but is not required by the current inference path.
 
-The Query Topology v1 diagnostic uses only APIs available in these recorded
-versions: PyTorch tensor operations, NumPy, OpenCV connected components, and
-JSON/CSV output. Run its bounded two-image smoke path before the complete
-seven-dataset collection:
-
-```bash
-GPU_LIST=0 NPROC=1 \
-ROOT=logs/query_topology_v1_smoke \
-bash tools/run_query_topology_v1.sh smoke
-```
+Historical Query Topology and other closed diagnostic commands were removed
+from this compatibility reference. Current runnable entry points are listed in
+the repository README and `state.md`.
