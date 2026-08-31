@@ -1,6 +1,6 @@
 import unittest
 
-from tools.plan_isaid_resume import plan_resume
+from tools.plan_evaluation_resume import plan_resume
 from tools.summarize_isaid_sequential_role_view import (
     expected_variants,
     summarize,

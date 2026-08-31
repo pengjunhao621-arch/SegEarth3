@@ -14,6 +14,7 @@ from tools.build_sequential_joint_registry import build_registry
 from tools.summarize_isaid_sequential_role_view import (
     expected_variants as expected_role_only_variants,
 )
+from tools.plan_evaluation_resume import dataset_images, plan_resume
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +37,26 @@ def class_contract(dataset):
 
 
 class DomainExtensionJointProfileTest(unittest.TestCase):
+
+    def test_voc20_resume_uses_validation_split_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image_dir = os.path.join(directory, 'JPEGImages')
+            split_dir = os.path.join(
+                directory, 'ImageSets', 'Segmentation')
+            os.makedirs(image_dir)
+            os.makedirs(split_dir)
+            for image_id in ('late', 'early', 'last'):
+                open(os.path.join(image_dir, f'{image_id}.jpg'), 'wb').close()
+            with open(os.path.join(split_dir, 'val.txt'), 'w',
+                      encoding='utf-8') as handle:
+                handle.write('late\nearly\nlast\n')
+            images = dataset_images('voc20', directory)
+        self.assertEqual(
+            [os.path.basename(path) for path in images],
+            ['late.jpg', 'early.jpg', 'last.jpg'])
+        result = plan_resume(images, {images[0]}, 'voc20')
+        self.assertEqual(result['dataset_indices'], -2)
+        self.assertEqual(result['first_missing_index'], 1)
 
     def test_prompt_banks_match_official_class_files(self):
         for dataset in DATASETS:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan a safe tail-only resume for an interrupted iSAID screen."""
+"""Plan a tail-only resume from image paths already recorded in JSONL."""
 
 import argparse
 import glob
@@ -9,7 +9,8 @@ import os
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--image-dir', required=True)
+    parser.add_argument('--dataset', choices=('isaid', 'voc20'), required=True)
+    parser.add_argument('--data-root', required=True)
     parser.add_argument('--inputs', nargs='+', required=True)
     parser.add_argument('--output', required=True)
     return parser.parse_args()
@@ -25,7 +26,32 @@ def ordered_images(image_dir):
     return sorted(paths)
 
 
-def completed_images(patterns):
+def ordered_voc20_images(data_root):
+    root = os.path.abspath(data_root)
+    split_path = os.path.join(root, 'ImageSets', 'Segmentation', 'val.txt')
+    with open(split_path, encoding='utf-8') as handle:
+        image_ids = [line.strip() for line in handle if line.strip()]
+    paths = [
+        os.path.abspath(os.path.join(root, 'JPEGImages', f'{image_id}.jpg'))
+        for image_id in image_ids
+    ]
+    missing = [path for path in paths if not os.path.isfile(path)]
+    if missing:
+        raise ValueError(
+            f'{len(missing)} VOC20 validation images are missing; '
+            f'first example: {missing[0]}')
+    return paths
+
+
+def dataset_images(dataset, data_root):
+    if dataset == 'isaid':
+        return ordered_images(os.path.join(data_root, 'img_dir', 'val'))
+    if dataset == 'voc20':
+        return ordered_voc20_images(data_root)
+    raise ValueError(f'Unsupported resume dataset: {dataset}')
+
+
+def completed_images(patterns, dataset):
     paths = sorted(set(
         path for pattern in patterns
         for path in (glob.glob(pattern) or [pattern])
@@ -43,7 +69,7 @@ def completed_images(patterns):
                         f'{path}:{line_number}: incomplete JSONL record; '
                         'remove only this final partial line before resuming.') \
                         from error
-                if str(record.get('dataset_name', '')).lower() != 'isaid':
+                if str(record.get('dataset_name', '')).lower() != dataset:
                     continue
                 image_path = record.get('img_path')
                 if image_path:
@@ -51,21 +77,22 @@ def completed_images(patterns):
     return completed, paths
 
 
-def plan_resume(images, completed):
+def plan_resume(images, completed, dataset='evaluation'):
     if not images:
-        raise ValueError('No iSAID PNG images were found.')
+        raise ValueError(f'No {dataset} evaluation images were found.')
     expected = set(images)
     unknown = sorted(completed - expected)
     if unknown:
         raise ValueError(
             f'{len(unknown)} logged image paths are outside the current '
-            f'iSAID image directory; first example: {unknown[0]}')
+            f'{dataset} evaluation split; first example: {unknown[0]}')
     first_missing = next(
         (index for index, path in enumerate(images) if path not in completed),
         len(images))
     remaining = len(images) - first_missing
     overlap = sum(path in completed for path in images[first_missing:])
     return dict(
+        dataset=dataset,
         total_images=len(images),
         completed_unique=len(completed),
         first_missing_index=first_missing,
@@ -80,9 +107,9 @@ def plan_resume(images, completed):
 
 def main():
     args = parse_args()
-    images = ordered_images(args.image_dir)
-    completed, inputs = completed_images(args.inputs)
-    result = plan_resume(images, completed)
+    images = dataset_images(args.dataset, args.data_root)
+    completed, inputs = completed_images(args.inputs, args.dataset)
+    result = plan_resume(images, completed, args.dataset)
     result['input_files'] = inputs
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, 'w', encoding='utf-8') as handle:

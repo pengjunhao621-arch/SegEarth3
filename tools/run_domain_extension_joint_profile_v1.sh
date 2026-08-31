@@ -11,6 +11,11 @@ DATA_HOME="${DATA_HOME:-/home/PengJunhao/workspace/data}"
 SMOKE_SAMPLES="${SMOKE_SAMPLES:-1}"
 INTEGRITY_TOLERANCE="${INTEGRITY_TOLERANCE:-1e-5}"
 BASELINE_TOLERANCE="${BASELINE_TOLERANCE:-0.05}"
+RUN_SHARD="${RUN_SHARD:-}"
+DATASET_INDICES="${DATASET_INDICES:-}"
+TORCHRUN_MODE="${TORCHRUN_MODE:-standalone}"
+TORCHRUN_MASTER_ADDR="${TORCHRUN_MASTER_ADDR:-127.0.0.1}"
+TORCHRUN_MASTER_PORT="${TORCHRUN_MASTER_PORT:-29643}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:128}"
 
 config_for() {
@@ -96,13 +101,26 @@ run_eval() {
     shift 3
     mkdir -p "${out_dir}"
     if [[ "${NPROC}" -gt 1 ]]; then
-        CUDA_VISIBLE_DEVICES="${GPU_LIST}" \
-            torchrun --standalone --nproc_per_node="${NPROC}" \
-            eval.py "${config}" \
-            --launcher pytorch \
-            --work-dir "${out_dir}/work" \
-            --result-file "${result_file}" \
-            "$@"
+        if [[ "${TORCHRUN_MODE}" == "static" ]]; then
+            CUDA_VISIBLE_DEVICES="${GPU_LIST}" \
+                torchrun --nnodes=1 --node_rank=0 \
+                --master_addr="${TORCHRUN_MASTER_ADDR}" \
+                --master_port="${TORCHRUN_MASTER_PORT}" \
+                --nproc_per_node="${NPROC}" \
+                eval.py "${config}" \
+                --launcher pytorch \
+                --work-dir "${out_dir}/work" \
+                --result-file "${result_file}" \
+                "$@"
+        else
+            CUDA_VISIBLE_DEVICES="${GPU_LIST}" \
+                torchrun --standalone --nproc_per_node="${NPROC}" \
+                eval.py "${config}" \
+                --launcher pytorch \
+                --work-dir "${out_dir}/work" \
+                --result-file "${result_file}" \
+                "$@"
+        fi
     else
         CUDA_VISIBLE_DEVICES="${GPU_LIST}" \
             "${PYTHON_BIN}" eval.py "${config}" \
@@ -158,7 +176,11 @@ collect_screen() {
     for dataset in ${DATASETS}; do
         config="$(config_for "${dataset}")"
         data_root="$(data_root_for "${dataset}")"
-        out_dir="${ROOT}/screen/${dataset}"
+        local shard="${dataset}"
+        if [[ -n "${RUN_SHARD}" ]]; then
+            shard="${RUN_SHARD}"
+        fi
+        out_dir="${ROOT}/screen/${shard}"
         mkdir -p "${out_dir}"
         existing="$(find "${out_dir}" -maxdepth 1 \
             -name 'screen.rank*.jsonl' -print -quit)"
@@ -187,10 +209,41 @@ collect_screen() {
         )
         if [[ "${scope}" == "smoke" ]]; then
             options+=(test_dataloader.dataset.indices="${SMOKE_SAMPLES}")
+        elif [[ -n "${DATASET_INDICES}" ]]; then
+            options+=(test_dataloader.dataset.indices="${DATASET_INDICES}")
         fi
         run_eval "${config}" "${out_dir}" "${out_dir}/results.json" \
             --cfg-options "${options[@]}"
     done
+}
+
+screen_inputs() {
+    [[ -d "${ROOT}/screen" ]] || return 0
+    find "${ROOT}/screen" -mindepth 2 -maxdepth 2 \
+        -name 'screen.rank*.jsonl' -type f | sort
+}
+
+plan_voc20_resume() {
+    local inputs=()
+    local path data_root
+    while IFS= read -r path; do inputs+=("${path}"); done < <(screen_inputs)
+    if [[ "${#inputs[@]}" -eq 0 ]]; then
+        echo "No partial VOC20 records found under ${ROOT}/screen." >&2
+        exit 2
+    fi
+    data_root="$(data_root_for voc20)"
+    mkdir -p "${ROOT}/summary"
+    "${PYTHON_BIN}" tools/plan_evaluation_resume.py \
+        --dataset voc20 \
+        --data-root "${data_root}" \
+        --inputs "${inputs[@]}" \
+        --output "${ROOT}/summary/voc20_resume_plan.json"
+}
+
+voc20_resume_indices() {
+    "${PYTHON_BIN}" -c \
+        'import json,sys; value=json.load(open(sys.argv[1]))["dataset_indices"]; print("" if value is None else value)' \
+        "${ROOT}/summary/voc20_resume_plan.json"
 }
 
 summarize() {
@@ -231,6 +284,33 @@ case "${MODE}" in
         collect_screen full
         summarize
         ;;
+    voc20-plan-resume)
+        DATASETS="voc20"
+        plan_voc20_resume
+        ;;
+    voc20-resume)
+        DATASETS="voc20"
+        preflight
+        plan_voc20_resume
+        DATASET_INDICES="$(voc20_resume_indices)"
+        if [[ -z "${DATASET_INDICES}" ]]; then
+            echo "VOC20 screen is already complete."
+            summarize
+            exit 0
+        fi
+        if [[ -z "${RUN_SHARD}" ]]; then
+            RUN_SHARD="voc20_resume_$(date +%Y%m%d_%H%M%S)"
+        fi
+        echo "Resuming VOC20 with dataset.indices=${DATASET_INDICES} " \
+             "into shard ${RUN_SHARD}."
+        collect_screen full
+        plan_voc20_resume
+        if [[ -n "$(voc20_resume_indices)" ]]; then
+            echo "VOC20 resume is still incomplete; inspect the new plan." >&2
+            exit 2
+        fi
+        summarize
+        ;;
     summarize) summarize ;;
     all)
         preflight
@@ -239,7 +319,7 @@ case "${MODE}" in
         summarize
         ;;
     *)
-        echo "Usage: $0 {preflight|smoke|baseline-all|screen-all|uavid-main|summarize|all}" >&2
+        echo "Usage: $0 {preflight|smoke|baseline-all|screen-all|uavid-main|voc20-plan-resume|voc20-resume|summarize|all}" >&2
         exit 2
         ;;
 esac

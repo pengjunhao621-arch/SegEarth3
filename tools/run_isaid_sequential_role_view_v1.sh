@@ -137,8 +137,9 @@ plan_resume() {
         exit 2
     fi
     mkdir -p "${ROOT}/summary"
-    "${PYTHON_BIN}" tools/plan_isaid_resume.py \
-        --image-dir "${ISAID_ROOT}/img_dir/val" \
+    "${PYTHON_BIN}" tools/plan_evaluation_resume.py \
+        --dataset isaid \
+        --data-root "${ISAID_ROOT}" \
         --inputs "${inputs[@]}" \
         --output "${ROOT}/summary/isaid_resume_plan.json"
 }
