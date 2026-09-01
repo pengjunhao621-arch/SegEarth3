@@ -6,7 +6,7 @@ import glob
 import json
 import os
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -136,7 +136,6 @@ def summarize(records):
         complement_counts = {
             name: defaultdict(int) for name in first['complementarity']}
         contract = dict(
-            global_source=first['global_source'],
             reference_endpoint=first['reference_endpoint'],
             role_candidates=first['role_candidates'],
             anchor_candidate=first['anchor_candidate'],
@@ -168,6 +167,8 @@ def summarize(records):
         metrics = {
             name: confusion_metrics(matrix) for name, matrix in matrices.items()
         }
+        global_source_counts = Counter(
+            value['joint_role_view']['global_source'] for value in values)
         row_metadata = first['variants']
         official_name = 'jrv_official'
         official = metrics[official_name]
@@ -186,6 +187,9 @@ def summarize(records):
         expected_sequential_miou = contract['prior_view_miou']
         reproduction_rows.append(dict(
             dataset=dataset,
+            global_source_counts=';'.join(
+                f'{name}:{count}'
+                for name, count in sorted(global_source_counts.items())),
             current_role_candidate=current,
             reference_endpoint=endpoint,
             expected_role_only_miou=expected_role_miou,
@@ -443,8 +447,8 @@ def write_report(path, result, missing, duplicates):
     lines.extend(['', '## Reproduction audit', '',
                   '| Dataset | Role expected | Role measured | Delta | '
                   'Sequential expected | Sequential measured | Delta | '
-                  'Identity max abs | Prompt parity max abs |',
-                  '|---|---:|---:|---:|---:|---:|---:|---:|---:|'])
+                  'Identity max abs | Prompt parity max abs | Global sources |',
+                  '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|'])
     for row in result['reproduction']:
         lines.append(
             f"| {row['dataset']} | "
@@ -455,7 +459,8 @@ def write_report(path, result, missing, duplicates):
             f"{_fmt(row['measured_sequential_miou'])} | "
             f"{_fmt(row['sequential_reproduction_delta'])} | "
             f"{row['reference_identity_max_abs']:.3e} | "
-            f"{row['native_prompt_parity_max_abs']:.3e} |")
+            f"{row['native_prompt_parity_max_abs']:.3e} | "
+            f"{row['global_source_counts']} |")
     lines.extend(['', '## Common View operator comparison', '',
                   '| Operator | Current Role macro | Positive | '
                   'Best Role macro | Positive |',

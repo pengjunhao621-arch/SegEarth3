@@ -106,10 +106,15 @@ class JointRoleViewTest(unittest.TestCase):
                     oracle_confusion=dict(matrix=[[6, 0], [0, 6]]))
                 for candidate in candidates},
         )
-        result = summarize([dict(
-            dataset_name='demo', img_path='demo.png',
-            class_names=['background', 'target'],
-            joint_role_view=payload)])
+        second_payload = dict(payload, global_source='full_image')
+        result = summarize([
+            dict(dataset_name='demo', img_path='demo-a.png',
+                 class_names=['background', 'target'],
+                 joint_role_view=payload),
+            dict(dataset_name='demo', img_path='demo-b.png',
+                 class_names=['background', 'target'],
+                 joint_role_view=second_payload),
+        ])
         profiles = {
             value['profile'] for value in result['profiles']}
         self.assertEqual(profiles, {
@@ -120,6 +125,9 @@ class JointRoleViewTest(unittest.TestCase):
         self.assertEqual(len(result['reproduction']), 1)
         self.assertAlmostEqual(
             result['reproduction'][0]['reference_identity_max_abs'], 0.0)
+        self.assertEqual(
+            result['reproduction'][0]['global_source_counts'],
+            'aligned_context:1;full_image:1')
 
 
 if __name__ == '__main__':
