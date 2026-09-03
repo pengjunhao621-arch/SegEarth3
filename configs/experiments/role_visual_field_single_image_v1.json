@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "protocol": "role_visual_field_v1",
+  "note": "Potsdam/Vaihingen single-image control. The current 512x512 image is Global; four 256x256 crops form Local. No neighboring file is read. The full-image Global anchor remains the official baseline reference.",
+  "datasets": {
+    "potsdam": {
+      "source_mode": "image",
+      "fine_size": 256,
+      "context_size": 512,
+      "reference_endpoint": "global"
+    },
+    "vaihingen": {
+      "source_mode": "image",
+      "fine_size": 256,
+      "context_size": 512,
+      "reference_endpoint": "global"
+    }
+  }
+}

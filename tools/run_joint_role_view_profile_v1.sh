@@ -2,11 +2,23 @@
 set -euo pipefail
 
 MODE="${1:-smoke}"
+case "${MODE}" in
+    single-image-smoke|single-image-all|single-image-summarize)
+        ROOT="${ROOT:-logs/joint_role_view_single_image_v1}"
+        DATASETS="${DATASETS:-potsdam vaihingen}"
+        VISUAL_FIELD_REGISTRY="${VISUAL_FIELD_REGISTRY:-configs/experiments/role_visual_field_single_image_v1.json}"
+        JOINT_PROFILE_REGISTRY="${JOINT_PROFILE_REGISTRY:-configs/experiments/joint_role_view_single_image_v1.json}"
+        MODE="${MODE#single-image-}"
+        ;;
+esac
 ROOT="${ROOT:-logs/joint_role_view_profile_v1}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 GPU_LIST="${GPU_LIST:-0,1}"
 NPROC="${NPROC:-2}"
 DATASETS="${DATASETS:-udd5 vdd vaihingen potsdam openearthmap loveda}"
+DATASETS="${DATASETS//,/ }"
+VISUAL_FIELD_REGISTRY="${VISUAL_FIELD_REGISTRY:-configs/experiments/role_visual_field_v1.json}"
+JOINT_PROFILE_REGISTRY="${JOINT_PROFILE_REGISTRY:-configs/experiments/joint_role_view_profiles_v1.json}"
 SMOKE_SAMPLES="${SMOKE_SAMPLES:-1}"
 INTEGRITY_TOLERANCE="${INTEGRITY_TOLERANCE:-1e-5}"
 VAIHINGEN_IMG_DIR="${VAIHINGEN_IMG_DIR:-/home/PengJunhao/workspace/data/vaihingen/img_dir/val}"
@@ -55,9 +67,22 @@ preflight() {
     if [[ "${SKIP_TILED_PREFLIGHT}" == "1" ]]; then
         return
     fi
-    local dirs=()
-    [[ " ${DATASETS} " == *" vaihingen "* ]] && dirs+=("${VAIHINGEN_IMG_DIR}")
-    [[ " ${DATASETS} " == *" potsdam "* ]] && dirs+=("${POTSDAM_IMG_DIR}")
+    local dirs=() dataset tiled_datasets
+    tiled_datasets="$("${PYTHON_BIN}" - "${VISUAL_FIELD_REGISTRY}" ${DATASETS} <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding='utf-8') as handle:
+    registry = json.load(handle)['datasets']
+print(' '.join(dataset for dataset in sys.argv[2:]
+               if registry[dataset]['source_mode'] == 'coordinate_tiles'))
+PY
+)"
+    for dataset in ${tiled_datasets}; do
+        case "${dataset}" in
+            vaihingen) dirs+=("${VAIHINGEN_IMG_DIR}") ;;
+            potsdam) dirs+=("${POTSDAM_IMG_DIR}") ;;
+        esac
+    done
     if [[ "${#dirs[@]}" -gt 0 ]]; then
         mkdir -p "${ROOT}/preflight"
         "${PYTHON_BIN}" tools/verify_tiled_context.py \
@@ -86,9 +111,9 @@ collect() {
             model.role_prompt_tta_prompt_bank="configs/prompt_banks/role_functional_text_v2/${dataset}.json"
             model.role_prompt_tta_selection_registry="configs/experiments/role_text_selections_v1.json"
             model.role_prompt_tta_visual_field_diagnosis=True
-            model.role_prompt_tta_visual_field_registry="configs/experiments/role_visual_field_v1.json"
+            model.role_prompt_tta_visual_field_registry="${VISUAL_FIELD_REGISTRY}"
             model.role_prompt_tta_visual_field_mode=joint_role_view
-            model.role_prompt_tta_joint_profile_registry="configs/experiments/joint_role_view_profiles_v1.json"
+            model.role_prompt_tta_joint_profile_registry="${JOINT_PROFILE_REGISTRY}"
             model.role_prompt_tta_stats_path="${out_dir}/screen.jsonl"
             model.role_prompt_tta_primary_variant=baseline
             model.role_prompt_tta_integrity_tolerance="${INTEGRITY_TOLERANCE}"
@@ -121,8 +146,7 @@ summarize() {
     "${PYTHON_BIN}" tools/summarize_joint_role_view.py \
         --inputs "${inputs[@]}" \
         --out-dir "${ROOT}/summary" \
-        --expected-datasets \
-        udd5 vdd vaihingen potsdam openearthmap loveda \
+        --expected-datasets ${DATASETS} \
         --allow-incomplete
 }
 
@@ -133,7 +157,7 @@ case "${MODE}" in
     summarize) summarize ;;
     all) collect full; summarize ;;
     *)
-        echo "Usage: $0 {preflight|smoke|collect-all|summarize|all}" >&2
+        echo "Usage: $0 {preflight|smoke|collect-all|summarize|all|single-image-smoke|single-image-all|single-image-summarize}" >&2
         exit 2
         ;;
 esac

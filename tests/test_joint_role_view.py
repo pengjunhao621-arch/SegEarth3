@@ -1,3 +1,5 @@
+import ast
+import json
 import os
 import unittest
 
@@ -16,6 +18,70 @@ DATASETS = ('udd5', 'vdd', 'vaihingen', 'potsdam', 'openearthmap', 'loveda')
 
 
 class JointRoleViewTest(unittest.TestCase):
+
+    def test_single_image_control_keeps_roles_and_never_reads_neighbors(self):
+        config_dir = os.path.join(ROOT, 'configs', 'experiments')
+        with open(os.path.join(
+                config_dir, 'role_visual_field_single_image_v1.json')) as handle:
+            fields = json.load(handle)['datasets']
+        with open(os.path.join(
+                config_dir, 'role_visual_field_v1.json')) as handle:
+            original_fields = json.load(handle)['datasets']
+
+        # Exercise the actual pure view helpers without loading SAM3/PyTorch.
+        path = os.path.join(ROOT, 'role_visual_field.py')
+        with open(path) as handle:
+            tree = ast.parse(handle.read(), filename=path)
+        cls = next(node for node in tree.body
+                   if isinstance(node, ast.ClassDef)
+                   and node.name == 'RoleVisualFieldMixin')
+        names = {'_rvf_grid_boxes', '_rvf_context_box', '_rvf_visual_units',
+                 '_jrv_global_source', '_rvf_fine_matches_official',
+                 '_jrv_reference_endpoint'}
+        cls.body = [node for node in cls.body
+                    if isinstance(node, ast.FunctionDef) and node.name in names]
+
+        def forbidden_neighbor_index(*args, **kwargs):
+            raise AssertionError('Single-image control accessed neighboring files.')
+
+        namespace = dict(os=os, CoordinateTileIndex=forbidden_neighbor_index)
+        exec(compile(ast.Module(body=[cls], type_ignores=[]), path, 'exec'),
+             namespace)
+
+        class Image:
+            width = height = 512
+            size = (512, 512)
+
+            def crop(self, box):
+                value = Image()
+                value.width, value.height = box[2] - box[0], box[3] - box[1]
+                value.size = (value.width, value.height)
+                return value
+
+        self.assertEqual(set(fields), {'potsdam', 'vaihingen'})
+        for dataset, config in fields.items():
+            original = load_joint_role_view_registry(REGISTRY, dataset)
+            control = load_joint_role_view_registry(os.path.join(
+                config_dir, 'joint_role_view_single_image_v1.json'), dataset)
+            self.assertEqual(control['role_candidates'], original['role_candidates'])
+            self.assertIsNone(control['prior_view_miou'])
+            self.assertEqual(original_fields[dataset]['source_mode'], 'coordinate_tiles')
+            helper = namespace['RoleVisualFieldMixin']()
+            helper._rvf_config = config
+            helper.slide_crop = helper.slide_stride = 0
+            helper._rvf_tile_indices = {}
+            image = Image()
+            self.assertEqual(helper._jrv_global_source(image), 'full_image')
+            self.assertEqual(helper._jrv_reference_endpoint(image), 'global')
+            units = helper._rvf_visual_units(image, '/not-a-directory/current.png')
+            self.assertEqual([unit['target_box'] for unit in units], [
+                (0, 0, 256, 256), (256, 0, 512, 256),
+                (0, 256, 256, 512), (256, 256, 512, 512)])
+            for unit in units:
+                self.assertEqual(unit['fine'].size, (256, 256))
+                self.assertEqual(unit['context'].size, (512, 512))
+                self.assertEqual(unit['metadata']['contributor_tiles'], 1)
+                self.assertEqual(unit['context_roi'], unit['target_box'])
 
     def test_registry_keeps_anchor_current_and_positive_alternatives(self):
         for dataset in DATASETS:

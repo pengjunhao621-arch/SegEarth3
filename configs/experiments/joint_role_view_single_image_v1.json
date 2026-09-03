@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "protocol": "joint_role_view_profile_v1",
+  "source_joint_registry": "configs/experiments/joint_role_view_profiles_v1.json",
+  "note": "Retain the previously tested compact Role candidate sets, including the best neighbor-context Joint profiles. Re-evaluate all existing View operators using only the current image. Historical neighbor-context mIoU is not a reproduction target for this new visual protocol.",
+  "datasets": {
+    "potsdam": {
+      "anchor_candidate": "anchor",
+      "current_role_candidate": "current",
+      "prior_view_operator": "linear_g075",
+      "prior_view_miou": null,
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 57.86661417693518},
+        {"id": "current", "slots": [1, 2, 0], "admission": "anchor_admission", "source_miou": 58.59495367756394},
+        {"id": "presence_only", "slots": [1, 0, 0], "admission": "native", "source_miou": 58.42534712004329},
+        {"id": "alt_s3", "slots": [1, 3, 0], "admission": "native", "source_miou": 58.127906782912476},
+        {"id": "all_nonzero", "slots": [1, 2, 1], "admission": "anchor_admission", "source_miou": 58.143564040802374},
+        {"id": "semantic_only", "slots": [0, 2, 0], "admission": "native", "source_miou": 58.00216411333437},
+        {"id": "presence_instance", "slots": [1, 0, 1], "admission": "native", "source_miou": 58.02137439216947}
+      ]
+    },
+    "vaihingen": {
+      "anchor_candidate": "anchor",
+      "current_role_candidate": "current",
+      "prior_view_operator": "max",
+      "prior_view_miou": null,
+      "role_candidates": [
+        {"id": "anchor", "slots": [0, 0, 0], "admission": "native", "source_miou": 60.859535895233876},
+        {"id": "current", "slots": [0, 3, 1], "admission": "native", "source_miou": 62.35103962597586},
+        {"id": "all_nonzero", "slots": [1, 3, 1], "admission": "anchor_admission", "source_miou": 62.26470277163838},
+        {"id": "semantic_only", "slots": [0, 3, 0], "admission": "native", "source_miou": 61.56553599204288},
+        {"id": "semantic_i2", "slots": [0, 3, 2], "admission": "native", "source_miou": 61.553754185829966},
+        {"id": "instance_only", "slots": [0, 0, 1], "admission": "native", "source_miou": 61.5267504421822},
+        {"id": "presence_instance", "slots": [1, 0, 1], "admission": "native", "source_miou": 61.37372221013181}
+      ]
+    }
+  }
+}
